@@ -96,3 +96,4 @@ If you need a different port, set `UNITY_READONLY_MCP_PORT` or `UNITY_MCP_PORT` 
 ## Repo-local skill
 
 - `.opencode/skills/unity-readonly-mcp-playbook/SKILL.md`
+- `.opencode/skills/unity-version-adaptation-playbook/SKILL.md`
