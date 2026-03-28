@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "readonly-unity": {
+      "command": "node",
+      "args": [
+        "D:/unity-mcp/src/index.js"
+      ],
+      "env": {
+        "UNITY_MCP_BASE_URL": "http://127.0.0.1:51234",
+        "UNITY_MCP_PORT": "51234",
+        "UNITY_MCP_TIMEOUT_MS": "15000"
+      }
+    }
+  }
+}
