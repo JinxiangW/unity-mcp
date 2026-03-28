@@ -196,36 +196,83 @@ function assertPathOrGuid(args) {
 }
 
 async function callUnity(toolName, args = {}) {
+  let result;
+
   switch (toolName) {
     case "get_asset_info":
       assertPathOrGuid(args);
-      return client.get("/api/assets/info", args);
+      result = await client.get("/api/assets/info", args);
+      break;
     case "get_asset_dependencies":
       assertPathOrGuid(args);
-      return client.get("/api/assets/dependencies", args);
+      result = await client.get("/api/assets/dependencies", args);
+      break;
     case "find_assets":
-      return client.get("/api/assets/find", args);
+      result = await client.get("/api/assets/find", args);
+      break;
     case "get_material_info":
       assertPathOrGuid(args);
-      return client.get("/api/materials/info", args);
+      result = await client.get("/api/materials/info", args);
+      break;
     case "get_shader_info":
       assertPathOrGuid(args);
-      return client.get("/api/shaders/info", args);
+      result = await client.get("/api/shaders/info", args);
+      break;
     case "find_materials_using_shader":
       if (!args.shaderName && !args.guid) {
         throw new Error("Either 'shaderName' or 'guid' is required.");
       }
-      return client.get("/api/shaders/materials", args);
+      result = await client.get("/api/shaders/materials", args);
+      break;
     case "get_shadergraph_info":
       assertPathOrGuid(args);
-      return client.get("/api/shadergraphs/info", args);
+      result = await client.get("/api/shadergraphs/info", args);
+      break;
     case "get_scene_info":
-      return client.get("/api/scenes/info", args);
+      result = await client.get("/api/scenes/info", args);
+      break;
     case "get_scene_renderers":
-      return client.get("/api/scenes/renderers", args);
+      result = await client.get("/api/scenes/renderers", args);
+      break;
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }
+
+  return normalizeToolResult(toolName, result, args);
+}
+
+function normalizeToolResult(toolName, result, args) {
+  if (toolName === "find_materials_using_shader" && result?.data?.materials) {
+    const materials = result.data.materials.filter((entry) =>
+      typeof entry?.path === "string" && entry.path.toLowerCase().endsWith(".mat"),
+    );
+
+    return {
+      ...result,
+      data: {
+        ...result.data,
+        materials,
+        materialCount: materials.length,
+      },
+    };
+  }
+
+  if (toolName === "find_assets" && args?.type === "Material" && result?.data?.assets) {
+    const assets = result.data.assets.filter((entry) =>
+      typeof entry?.path === "string" && entry.path.toLowerCase().endsWith(".mat"),
+    );
+
+    return {
+      ...result,
+      data: {
+        ...result.data,
+        returned: assets.length,
+        assets,
+      },
+    };
+  }
+
+  return result;
 }
 
 const server = new Server(

@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
+using TA.ReadOnlyUnityMcp.Compat;
+using TA.ReadOnlyUnityMcp.Compat.Shader;
+using TA.ReadOnlyUnityMcp.Contracts;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -96,7 +98,7 @@ namespace TA.ReadOnlyUnityMcp
                 doubleSidedGI = material.doubleSidedGI,
                 globalIlluminationFlags = material.globalIlluminationFlags.ToString(),
                 shaderKeywords = material.shaderKeywords ?? Array.Empty<string>(),
-                properties = GetMaterialProperties(material)
+                properties = CompatServices.Shader.ReadMaterialProperties(material)
             };
         }
 
@@ -109,32 +111,25 @@ namespace TA.ReadOnlyUnityMcp
                 throw new InvalidOperationException($"Asset at '{assetPath}' is not a Shader.");
             }
 
-            var passes = new List<object>();
-            for (var passIndex = 0; passIndex < shader.passCount; passIndex++)
-            {
-                passes.Add(new
-                {
-                    index = passIndex,
-                    name = shader.GetPassName(passIndex)
-                });
-            }
-
-            var sourceInfo = GetShaderSourceInfo(assetPath);
+            var passes = CompatServices.Shader.ReadPasses(shader);
+            var keywords = CompatServices.Shader.ReadKeywords(shader);
+            var properties = CompatServices.Shader.ReadProperties(shader);
+            var sourceInfo = ShaderSourceMetadataReader.Read(ToAbsoluteProjectPath(assetPath));
             var usageMaterials = includeUsage ? FindMaterialsForShader(shader.name) : null;
 
-            return new
+            return new ShaderInfoDto
             {
                 asset = DescribeAssetReference(assetPath),
                 name = shader.name,
                 isSupported = shader.isSupported,
                 maximumLOD = shader.maximumLOD,
-                passCount = shader.passCount,
-                passes,
-                keywords = GetShaderKeywords(shader),
-                properties = GetShaderPropertyDescriptions(shader),
+                passCount = passes.Count,
+                passes = passes,
+                keywords = keywords,
+                properties = properties,
                 fallback = sourceInfo.fallback,
                 customEditor = sourceInfo.customEditor,
-                usage = usageMaterials != null ? new
+                usage = usageMaterials != null ? new ShaderUsageDto
                 {
                     materialCount = usageMaterials.Count,
                     materials = usageMaterials
@@ -169,11 +164,11 @@ namespace TA.ReadOnlyUnityMcp
 
             return new
             {
-                shader = shader != null ? DescribeShaderReference(shader) : new
+                shader = shader != null ? DescribeShaderReference(shader) : new ShaderReferenceDto
                 {
                     name = shaderName,
                     path = assetPath,
-                    guid
+                    guid = guid
                 },
                 materials,
                 materialCount = materials.Count,
@@ -191,14 +186,7 @@ namespace TA.ReadOnlyUnityMcp
                 throw new InvalidOperationException($"Asset at '{assetPath}' is not a Shader Graph asset.");
             }
 
-            var absolutePath = ToAbsoluteProjectPath(assetPath);
-            if (!File.Exists(absolutePath))
-            {
-                throw new FileNotFoundException("Shader Graph source file was not found.", absolutePath);
-            }
-
-            var text = File.ReadAllText(absolutePath);
-            var parsed = UnityShaderGraphTextParser.Parse(assetPath, text);
+            var parsed = CompatServices.ShaderGraph.Read(assetPath);
             var dependencyPaths = AssetDatabase.GetDependencies(assetPath, false)
                 .Where(candidate => candidate != assetPath)
                 .Where(candidate => string.Equals(Path.GetExtension(candidate), ".shadersubgraph", StringComparison.OrdinalIgnoreCase))
@@ -208,9 +196,9 @@ namespace TA.ReadOnlyUnityMcp
             return new
             {
                 asset = DescribeAssetReference(assetPath),
-                sourceLength = text.Length,
+                sourceLength = parsed.sourceLength,
                 subGraphDependencies = dependencyPaths,
-                graph = parsed
+                graph = parsed.graph
             };
         }
 
@@ -344,125 +332,29 @@ namespace TA.ReadOnlyUnityMcp
                 .ToList();
         }
 
-        private static List<object> FindMaterialsForShader(string shaderName)
+        private static List<MaterialReferenceDto> FindMaterialsForShader(string shaderName)
         {
-            var materials = AssetDatabase.FindAssets("t:Material")
-                .Select(AssetDatabase.GUIDToAssetPath)
-                .Select(path => AssetDatabase.LoadAssetAtPath<Material>(path))
-                .Where(material => material != null && material.shader != null && material.shader.name == shaderName)
-                .Select(DescribeMaterialReference)
-                .Cast<object>()
+            var materials = AssetDatabase.GetAllAssetPaths()
+                .Where(path => path.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)
+                               || path.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase))
+                .Where(path => string.Equals(Path.GetExtension(path), ".mat", StringComparison.OrdinalIgnoreCase))
+                .Select(path => new
+                {
+                    path,
+                    material = AssetDatabase.LoadAssetAtPath<Material>(path)
+                })
+                .Where(entry => entry.material != null)
+                .Where(entry => entry.material.shader != null && entry.material.shader.name == shaderName)
+                .Select(entry => new MaterialReferenceDto
+                {
+                    name = entry.material.name,
+                    path = entry.path,
+                    guid = AssetDatabase.AssetPathToGUID(entry.path),
+                    shader = DescribeShaderReference(entry.material.shader)
+                })
                 .ToList();
 
             return materials;
-        }
-
-        private static List<object> GetMaterialProperties(Material material)
-        {
-            if (material.shader == null)
-            {
-                return new List<object>();
-            }
-
-            var properties = new List<object>();
-            var propertyCount = ShaderUtil.GetPropertyCount(material.shader);
-
-            for (var propertyIndex = 0; propertyIndex < propertyCount; propertyIndex++)
-            {
-                var propertyName = ShaderUtil.GetPropertyName(material.shader, propertyIndex);
-                var propertyType = ShaderUtil.GetPropertyType(material.shader, propertyIndex);
-                object value = null;
-
-                switch (propertyType)
-                {
-                    case ShaderUtil.ShaderPropertyType.Color:
-                        value = ToColorObject(material.GetColor(propertyName));
-                        break;
-
-                    case ShaderUtil.ShaderPropertyType.Vector:
-                        value = ToVectorObject(material.GetVector(propertyName));
-                        break;
-
-                    case ShaderUtil.ShaderPropertyType.Float:
-                    case ShaderUtil.ShaderPropertyType.Range:
-                        value = material.GetFloat(propertyName);
-                        break;
-
-                    case ShaderUtil.ShaderPropertyType.TexEnv:
-                        var texture = material.GetTexture(propertyName);
-                        value = new
-                        {
-                            texture = texture != null ? DescribeTextureReference(texture) : null,
-                            scale = ToVector2Object(material.GetTextureScale(propertyName)),
-                            offset = ToVector2Object(material.GetTextureOffset(propertyName))
-                        };
-                        break;
-                }
-
-                properties.Add(new
-                {
-                    name = propertyName,
-                    description = ShaderUtil.GetPropertyDescription(material.shader, propertyIndex),
-                    type = propertyType.ToString(),
-                    value
-                });
-            }
-
-            return properties;
-        }
-
-        private static List<object> GetShaderPropertyDescriptions(Shader shader)
-        {
-            var properties = new List<object>();
-            var propertyCount = ShaderUtil.GetPropertyCount(shader);
-
-            for (var propertyIndex = 0; propertyIndex < propertyCount; propertyIndex++)
-            {
-                var propertyType = ShaderUtil.GetPropertyType(shader, propertyIndex);
-                float? rangeMin = null;
-                float? rangeMax = null;
-
-                if (propertyType == ShaderUtil.ShaderPropertyType.Range)
-                {
-                    try
-                    {
-                        rangeMin = ShaderUtil.GetRangeLimits(shader, propertyIndex, 1);
-                        rangeMax = ShaderUtil.GetRangeLimits(shader, propertyIndex, 2);
-                    }
-                    catch
-                    {
-                    }
-                }
-
-                properties.Add(new
-                {
-                    name = ShaderUtil.GetPropertyName(shader, propertyIndex),
-                    description = ShaderUtil.GetPropertyDescription(shader, propertyIndex),
-                    type = propertyType.ToString(),
-                    flags = ShaderUtil.GetPropertyFlags(shader, propertyIndex).ToString(),
-                    rangeMin,
-                    rangeMax,
-                    attributes = ShaderUtil.GetPropertyAttributes(shader, propertyIndex)
-                });
-            }
-
-            return properties;
-        }
-
-        private static List<object> GetShaderKeywords(Shader shader)
-        {
-            var keywords = new List<object>();
-            foreach (var keyword in shader.keywordSpace.keywords)
-            {
-                keywords.Add(new
-                {
-                    name = keyword.name,
-                    isOverridable = keyword.isOverridable,
-                    isDynamic = ReadOptionalMember(keyword, "isDynamic")
-                });
-            }
-
-            return keywords;
         }
 
         private static object GetImportSettings(string assetPath)
@@ -531,13 +423,13 @@ namespace TA.ReadOnlyUnityMcp
             return results;
         }
 
-        private static object DescribeAssetReference(string assetPath)
+        internal static AssetReferenceDto DescribeAssetReference(string assetPath)
         {
             var normalizedPath = NormalizeAssetPath(assetPath);
             var mainAsset = AssetDatabase.LoadMainAssetAtPath(normalizedPath);
             var assetType = AssetDatabase.GetMainAssetTypeAtPath(normalizedPath);
 
-            return new
+            return new AssetReferenceDto
             {
                 name = mainAsset != null ? mainAsset.name : Path.GetFileNameWithoutExtension(normalizedPath),
                 path = normalizedPath,
@@ -546,36 +438,36 @@ namespace TA.ReadOnlyUnityMcp
             };
         }
 
-        private static object DescribeShaderReference(Shader shader)
+        internal static ShaderReferenceDto DescribeShaderReference(Shader shader)
         {
             var path = AssetDatabase.GetAssetPath(shader);
-            return new
+            return new ShaderReferenceDto
             {
                 name = shader.name,
-                path,
+                path = path,
                 guid = string.IsNullOrWhiteSpace(path) ? null : AssetDatabase.AssetPathToGUID(path)
             };
         }
 
-        private static object DescribeMaterialReference(Material material)
+        internal static MaterialReferenceDto DescribeMaterialReference(Material material)
         {
             var path = AssetDatabase.GetAssetPath(material);
-            return new
+            return new MaterialReferenceDto
             {
                 name = material.name,
-                path,
+                path = path,
                 guid = string.IsNullOrWhiteSpace(path) ? null : AssetDatabase.AssetPathToGUID(path),
                 shader = material.shader != null ? DescribeShaderReference(material.shader) : null
             };
         }
 
-        private static object DescribeTextureReference(Texture texture)
+        internal static AssetReferenceDto DescribeTextureReference(Texture texture)
         {
             var path = AssetDatabase.GetAssetPath(texture);
-            return new
+            return new AssetReferenceDto
             {
                 name = texture.name,
-                path,
+                path = path,
                 guid = string.IsNullOrWhiteSpace(path) ? null : AssetDatabase.AssetPathToGUID(path),
                 type = texture.GetType().FullName
             };
@@ -633,7 +525,7 @@ namespace TA.ReadOnlyUnityMcp
             };
         }
 
-        private static object DescribeUnityObject(UnityEngine.Object value)
+        private static AssetReferenceDto DescribeUnityObject(UnityEngine.Object value)
         {
             if (value == null)
             {
@@ -641,10 +533,10 @@ namespace TA.ReadOnlyUnityMcp
             }
 
             var path = AssetDatabase.GetAssetPath(value);
-            return new
+            return new AssetReferenceDto
             {
                 name = value.name,
-                path,
+                path = path,
                 guid = string.IsNullOrWhiteSpace(path) ? null : AssetDatabase.AssetPathToGUID(path),
                 type = value.GetType().FullName
             };
@@ -677,7 +569,7 @@ namespace TA.ReadOnlyUnityMcp
             return string.IsNullOrWhiteSpace(path) ? null : path.Trim().Replace('\\', '/');
         }
 
-        private static string ToAbsoluteProjectPath(string assetPath)
+        internal static string ToAbsoluteProjectPath(string assetPath)
         {
             if (Path.IsPathRooted(assetPath))
             {
@@ -701,7 +593,7 @@ namespace TA.ReadOnlyUnityMcp
             return string.Join("/", parts);
         }
 
-        private static object ToColorObject(Color color)
+        internal static object ToColorObject(Color color)
         {
             return new
             {
@@ -712,7 +604,7 @@ namespace TA.ReadOnlyUnityMcp
             };
         }
 
-        private static object ToVectorObject(Vector4 value)
+        internal static object ToVector4Object(Vector4 value)
         {
             return new
             {
@@ -723,7 +615,7 @@ namespace TA.ReadOnlyUnityMcp
             };
         }
 
-        private static object ToVector2Object(Vector2 value)
+        internal static object ToVector2Object(Vector2 value)
         {
             return new
             {
@@ -732,7 +624,7 @@ namespace TA.ReadOnlyUnityMcp
             };
         }
 
-        private static object ToVector3Object(Vector3 value)
+        internal static object ToVector3Object(Vector3 value)
         {
             return new
             {
@@ -760,21 +652,5 @@ namespace TA.ReadOnlyUnityMcp
             return field?.GetValue(instance);
         }
 
-        private static (string fallback, string customEditor) GetShaderSourceInfo(string assetPath)
-        {
-            var absolutePath = ToAbsoluteProjectPath(assetPath);
-            if (!File.Exists(absolutePath))
-            {
-                return (null, null);
-            }
-
-            var source = File.ReadAllText(absolutePath);
-            var fallbackMatch = Regex.Match(source, "\\bFallback\\s+\"?(?<value>[^\"\\r\\n]+)\"?", RegexOptions.IgnoreCase);
-            var customEditorMatch = Regex.Match(source, "\\bCustomEditor\\s+\"(?<value>[^\"]+)\"", RegexOptions.IgnoreCase);
-
-            var fallback = fallbackMatch.Success ? fallbackMatch.Groups["value"].Value.Trim() : null;
-            var customEditor = customEditorMatch.Success ? customEditorMatch.Groups["value"].Value.Trim() : null;
-            return (fallback, customEditor);
-        }
     }
 }

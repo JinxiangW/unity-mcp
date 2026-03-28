@@ -85,3 +85,14 @@ If you need a different port, set `UNITY_READONLY_MCP_PORT` or `UNITY_MCP_PORT` 
 - `get_scene_info` and `get_scene_renderers` only inspect currently loaded scenes in the Editor.
 - Shader Graph parsing is intentionally read-only and structure-focused.
 - Shader Graph output is best-effort across Unity package versions; when schema details vary, raw structural metadata is still returned.
+
+## Maintenance docs
+
+- `AGENTS.md`
+- `docs/architecture.md`
+- `docs/maintenance-strategy.md`
+- `docs/multi-version-compatibility.md`
+
+## Repo-local skill
+
+- `.opencode/skills/unity-readonly-mcp-playbook/SKILL.md`
