@@ -347,6 +347,56 @@ Unity 6000.4   expected        smoke-tested only
 Unity 2022 LTS partial         shadergraph and shader APIs need extra validation
 ```
 
+## Current compatibility status
+
+```text
+Unity 6000.3.7f1   supported   primary dev target, full smoke test passed
+Unity 2019.4.41f2 partial     URP 7.7.1 smoke test passed, legacy Shader Graph uses best-effort parsing
+```
+
+### Unity 2019.4.41f2 notes
+
+Validated against:
+
+- Unity `2019.4.41f2`
+- URP `7.7.1`
+- Shader Graph `7.7.1`
+- project: `D:/UnityProjects/URPSample`
+
+What passed:
+
+- package resolved as an embedded package
+- `TA.ReadOnlyUnityMcp.Editor.dll` compiled cleanly
+- `/health`
+- `/api/scenes/info`
+- `/api/scenes/renderers`
+- `/api/materials/info`
+- `/api/shaders/info`
+- `/api/shadergraphs/info`
+
+What needed adaptation:
+
+- package metadata had to allow Unity `2019.4`
+- the target project needed an explicit embedded-package dependency entry in `Packages/manifest.json`
+- legacy Shader Graph files required a schema adapter for:
+  - `m_SerializedProperties`
+  - `m_SerializableNodes`
+  - `m_SerializableEdges`
+  - legacy master-node output inference
+
+Known limitations on 2019.4:
+
+- legacy Shader Graph parsing is structure-focused and best-effort
+- old-format graphs may not provide modern `targets` or `keywords`
+- shader pass names may be `null`
+- warning strings are expected for legacy graph normalization
+
+Compatibility rule reinforced by this test:
+
+- `Compat/ShaderGraph/` is the right place to absorb old Shader Graph schema drift
+- outward MCP tools and route names did not need to change
+- DTO shapes remained stable while the legacy reader normalized older graph data
+
 ## Definition of success
 
 This design is working when:

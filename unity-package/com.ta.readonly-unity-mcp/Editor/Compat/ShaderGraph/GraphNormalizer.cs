@@ -90,12 +90,15 @@ namespace TA.ReadOnlyUnityMcp.Compat.ShaderGraph
 
         private ShaderGraphPropertyDto SimplifyProperty(JObject property)
         {
+            var overrideReferenceName = property.Value<string>("m_OverrideReferenceName");
             return new ShaderGraphPropertyDto
             {
                 objectId = property.Value<string>("m_ObjectId"),
                 type = property.Value<string>("m_Type"),
                 displayName = adapter.FirstString(property, "m_DisplayName", "m_Name"),
-                referenceName = adapter.FirstString(property, "m_RefNameGeneratedByDisplayName", "m_ReferenceName", "m_Name"),
+                referenceName = !string.IsNullOrWhiteSpace(overrideReferenceName)
+                    ? overrideReferenceName
+                    : adapter.FirstString(property, "m_RefNameGeneratedByDisplayName", "m_ReferenceName", "m_DefaultReferenceName", "m_Name"),
                 valueType = adapter.FirstString(property, "m_ValueType", "m_Type")
             };
         }
@@ -128,7 +131,7 @@ namespace TA.ReadOnlyUnityMcp.Compat.ShaderGraph
                     height = node["m_DrawState"]["m_Position"].Value<float?>("height")
                 } : null,
                 subGraphGuid = adapter.ExtractSubGraphGuid(node["m_SerializedSubGraph"]),
-                slots = node["m_Slots"] is JArray slots ? slots.Count : 0
+                slots = node["m_Slots"] is JArray slots ? slots.Count : node["m_SerializableSlots"] is JArray legacySlots ? legacySlots.Count : 0
             };
         }
 
@@ -137,9 +140,11 @@ namespace TA.ReadOnlyUnityMcp.Compat.ShaderGraph
             return new ShaderGraphEdgeDto
             {
                 objectId = edge.Value<string>("m_ObjectId"),
-                outputNodeId = edge["m_OutputSlot"]?["m_Node"]?.Value<string>("m_Id"),
+                outputNodeId = edge["m_OutputSlot"]?["m_Node"]?.Value<string>("m_Id")
+                               ?? edge["m_OutputSlot"]?.Value<string>("m_NodeGUIDSerialized"),
                 outputSlotId = edge["m_OutputSlot"]?.Value<int?>("m_SlotId"),
-                inputNodeId = edge["m_InputSlot"]?["m_Node"]?.Value<string>("m_Id"),
+                inputNodeId = edge["m_InputSlot"]?["m_Node"]?.Value<string>("m_Id")
+                              ?? edge["m_InputSlot"]?.Value<string>("m_NodeGUIDSerialized"),
                 inputSlotId = edge["m_InputSlot"]?.Value<int?>("m_SlotId")
             };
         }
