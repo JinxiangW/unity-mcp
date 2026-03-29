@@ -128,6 +128,22 @@ const tools = [
     },
   },
   {
+    name: "get_material_export_spec",
+    description: "Build a read-only material export spec for downstream transfer workflows.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        guid: { type: "string" },
+        exportProfile: { type: "string", description: "Transfer profile, for example ue-pbr", default: "ue-pbr" },
+        includeShaderGraph: { type: "boolean", default: true },
+        recursiveShaderGraphs: { type: "boolean", default: true },
+        includeRawProperties: { type: "boolean", default: true },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "get_shader_info",
     description: "Read shader metadata, properties, keywords, passes, and usage.",
     inputSchema: {
@@ -213,6 +229,10 @@ async function callUnity(toolName, args = {}) {
     case "get_material_info":
       assertPathOrGuid(args);
       result = await client.get("/api/materials/info", args);
+      break;
+    case "get_material_export_spec":
+      assertPathOrGuid(args);
+      result = await client.get("/api/materials/export-spec", args);
       break;
     case "get_shader_info":
       assertPathOrGuid(args);

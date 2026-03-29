@@ -188,6 +188,16 @@ namespace TA.ReadOnlyUnityMcp
                             GetString(context.Request.QueryString, "guid")), MainThreadTimeoutMs);
                         break;
 
+                    case "/api/materials/export-spec":
+                        payload = UnityReadOnlyMcpMainThread.Invoke(() => UnityReadOnlyMcpQueries.GetMaterialExportSpec(
+                            GetString(context.Request.QueryString, "path"),
+                            GetString(context.Request.QueryString, "guid"),
+                            GetString(context.Request.QueryString, "exportProfile"),
+                            GetBool(context.Request.QueryString, "includeShaderGraph", true),
+                            GetBool(context.Request.QueryString, "recursiveShaderGraphs", true),
+                            GetBool(context.Request.QueryString, "includeRawProperties", true)), MainThreadTimeoutMs);
+                        break;
+
                     case "/api/shaders/info":
                         payload = UnityReadOnlyMcpMainThread.Invoke(() => UnityReadOnlyMcpQueries.GetShaderInfo(
                             GetString(context.Request.QueryString, "path"),

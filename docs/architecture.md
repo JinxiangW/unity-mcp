@@ -54,6 +54,7 @@ File: `unity-package/com.ta.readonly-unity-mcp/Editor/UnityShaderGraphTextParser
 
 - Asset: info, dependencies, reverse references, search
 - Material: shader linkage, keywords, property values
+- Material export: transferable semantics, texture export planning, optional recursive Shader Graph bundle data
 - Shader: properties, keywords, passes, usage lookup
 - Shader Graph: properties, keywords, nodes, edges, subgraphs, targets
 - Scene: active/loaded scenes, renderer-material bindings, lights, probes, volumes

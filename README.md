@@ -11,6 +11,7 @@ It is split into two pieces:
 
 - Asset info, dependencies, and reverse-reference lookup
 - Material info and shader linkage
+- Material export specs for downstream transfer workflows
 - Shader properties, keywords, fallback, custom editor, and usage lookup
 - Shader Graph structure inspection
 - Loaded scene info and renderer-material bindings
@@ -50,6 +51,12 @@ npm install
 npm start
 ```
 
+Optional: export a material package from the Unity HTTP bridge:
+
+```bash
+npm run export-material -- --path "Assets/Art/Wings/Wing_L.mat" --out "D:/exports"
+```
+
 5. Point your MCP client to the stdio server. Example config:
 
 ```json
@@ -74,6 +81,7 @@ If you need a different port, set `UNITY_READONLY_MCP_PORT` or `UNITY_MCP_PORT` 
 - `get_asset_dependencies`
 - `find_assets`
 - `get_material_info`
+- `get_material_export_spec`
 - `get_shader_info`
 - `find_materials_using_shader`
 - `get_shadergraph_info`
@@ -84,6 +92,8 @@ If you need a different port, set `UNITY_READONLY_MCP_PORT` or `UNITY_MCP_PORT` 
 
 - `get_scene_info` and `get_scene_renderers` only inspect currently loaded scenes in the Editor.
 - Shader Graph parsing is intentionally read-only and structure-focused.
+- `get_material_export_spec` returns a transfer-oriented JSON spec, suggested export filenames, and optional recursive Shader Graph bundle data, but it does not write files or copy textures.
+- `scripts/export-material-package.js` is the write-side bridge that consumes `get_material_export_spec` and writes `manifest.json`, optional Shader Graph bundle files, and copied textures into an output directory.
 - Shader Graph output is best-effort across Unity package versions; when schema details vary, raw structural metadata is still returned.
 
 ## Maintenance docs
