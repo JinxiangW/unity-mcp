@@ -21,7 +21,9 @@ namespace TA.ReadOnlyUnityMcp.Compat.ShaderGraph
                 return new ShaderGraphInfoDto
                 {
                     format = envelope.format,
-                    parseError = "No JSON objects were found in the Shader Graph file.",
+                    parseError = string.IsNullOrWhiteSpace(envelope.parseError)
+                        ? "No JSON objects were found in the Shader Graph file."
+                        : envelope.parseError,
                     warnings = envelope.warnings,
                     properties = new List<ShaderGraphPropertyDto>(),
                     keywords = new List<ShaderGraphKeywordDto>(),
@@ -67,6 +69,7 @@ namespace TA.ReadOnlyUnityMcp.Compat.ShaderGraph
             {
                 format = envelope.format,
                 rootType = envelope.root.Value<string>("m_Type"),
+                parseError = envelope.parseError,
                 nodeCount = nodes.Count,
                 edgeCount = edges.Count,
                 propertyCount = properties.Count,

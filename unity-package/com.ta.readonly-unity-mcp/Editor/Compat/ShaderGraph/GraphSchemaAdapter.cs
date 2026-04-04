@@ -14,11 +14,17 @@ namespace TA.ReadOnlyUnityMcp.Compat.ShaderGraph
             public JObject root;
             public IReadOnlyDictionary<string, JObject> objectMap;
             public List<string> warnings;
+            public string parseError;
         }
 
-        public Envelope BuildEnvelope(List<JObject> objects)
+        public Envelope BuildEnvelope(GraphEnvelopeReader.ParseResult parseResult)
         {
+            var objects = parseResult?.objects ?? new List<JObject>();
             var warnings = new List<string>();
+            if (parseResult?.warnings != null)
+            {
+                warnings.AddRange(parseResult.warnings);
+            }
 
             if (objects == null || objects.Count == 0)
             {
@@ -27,7 +33,8 @@ namespace TA.ReadOnlyUnityMcp.Compat.ShaderGraph
                     format = "unknown",
                     root = null,
                     objectMap = new Dictionary<string, JObject>(),
-                    warnings = warnings
+                    warnings = warnings,
+                    parseError = parseResult?.parseError
                 };
             }
 
@@ -64,7 +71,8 @@ namespace TA.ReadOnlyUnityMcp.Compat.ShaderGraph
                 format = root["m_Type"] != null ? "multi-json" : "single-json",
                 root = root,
                 objectMap = objectMap,
-                warnings = warnings
+                warnings = warnings,
+                parseError = parseResult?.parseError
             };
         }
 

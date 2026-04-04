@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Specialized;
-using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -132,12 +131,6 @@ namespace TA.ReadOnlyUnityMcp
         {
             try
             {
-                if (context.Request.HttpMethod == "OPTIONS")
-                {
-                    WriteJson(context.Response, 200, new { ok = true });
-                    return;
-                }
-
                 if (context.Request.HttpMethod != "GET")
                 {
                     WriteError(context.Response, 405, "Only GET is supported.");
@@ -154,8 +147,7 @@ namespace TA.ReadOnlyUnityMcp
                         {
                             service = "readonly-unity-mcp",
                             version = "0.1.0",
-                            unityVersion = Application.unityVersion,
-                            projectPath = Directory.GetCurrentDirectory()
+                            unityVersion = Application.unityVersion
                         }, MainThreadTimeoutMs);
                         break;
 
@@ -253,9 +245,6 @@ namespace TA.ReadOnlyUnityMcp
             response.ContentType = "application/json; charset=utf-8";
             response.ContentEncoding = Encoding.UTF8;
             response.Headers["Cache-Control"] = "no-store";
-            response.Headers["Access-Control-Allow-Origin"] = "*";
-            response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS";
-            response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
 
             using (var stream = response.OutputStream)
             {

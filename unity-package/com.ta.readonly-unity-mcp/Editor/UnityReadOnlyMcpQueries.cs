@@ -154,9 +154,11 @@ namespace TA.ReadOnlyUnityMcp
             var surfaceType = material.renderQueue >= 3000 ? "Transparent" : "Opaque";
             var blendMode = alphaClip ? "Masked" : (material.renderQueue >= 3000 ? "Translucent" : "Opaque");
             var twoSided = HasKeyword(material.shaderKeywords, "_DOUBLESIDED_ON") || material.doubleSidedGI;
-            var pipeline = InferPipeline(shader);
+            var pipeline = InferPipeline(shader, shaderPath);
             var transferMode = isShaderGraph ? "custom_graph_needed" : "material_instance";
             var confidence = isShaderGraph ? 0.45 : 0.9;
+            var usesBaseMapAlphaAsOpacity = alphaClip || string.Equals(surfaceType, "Transparent", StringComparison.OrdinalIgnoreCase);
+            var opacityValue = usesBaseMapAlphaAsOpacity ? (GetColorAlphaValue(baseColorProperty) ?? 1f) : 1f;
 
             if (isShaderGraph)
             {
@@ -191,7 +193,7 @@ namespace TA.ReadOnlyUnityMcp
             }
 
             var textures = new JArray();
-            AddTextureExport(textures, material.name, "baseColor", "_BaseMap", baseMapProperty, BuildChannelPacking("baseColor.r", "baseColor.g", "baseColor.b", "opacity"));
+            AddTextureExport(textures, material.name, "baseColor", "_BaseMap", baseMapProperty, BuildChannelPacking("baseColor.r", "baseColor.g", "baseColor.b", usesBaseMapAlphaAsOpacity ? "opacity" : null));
             AddTextureExport(textures, material.name, "normal", "_BumpMap", normalMapProperty, new JObject { ["rgb"] = "normal" });
             AddTextureExport(textures, material.name, "metallicRoughnessMask", "_MetallicGlossMap", metallicMapProperty, new JObject { ["r"] = "metallic", ["a"] = "smoothness" });
             AddTextureExport(textures, material.name, "occlusion", "_OcclusionMap", occlusionMapProperty, new JObject { ["g"] = "occlusion" });
@@ -329,9 +331,9 @@ namespace TA.ReadOnlyUnityMcp
                     },
                     ["opacity"] = new JObject
                     {
-                        ["value"] = surfaceType == "Transparent" ? 1.0 : 1.0,
-                        ["textureId"] = GetTextureReference(baseMapProperty) != null ? "baseColor" : null,
-                        ["channel"] = GetTextureReference(baseMapProperty) != null ? "a" : null,
+                        ["value"] = opacityValue,
+                        ["textureId"] = usesBaseMapAlphaAsOpacity && GetTextureReference(baseMapProperty) != null ? "baseColor" : null,
+                        ["channel"] = usesBaseMapAlphaAsOpacity && GetTextureReference(baseMapProperty) != null ? "a" : null,
                         ["rawPropertyNames"] = new JArray("_BaseMap", "_Cutoff")
                     },
                     ["occlusion"] = new JObject
@@ -383,7 +385,7 @@ namespace TA.ReadOnlyUnityMcp
             var keywords = CompatServices.Shader.ReadKeywords(shader);
             var properties = CompatServices.Shader.ReadProperties(shader);
             var sourceInfo = ShaderSourceMetadataReader.Read(ToAbsoluteProjectPath(assetPath));
-            var usageMaterials = includeUsage ? FindMaterialsForShader(shader.name) : null;
+            var usageMaterials = includeUsage ? FindMaterialsForShader(assetPath, shader.name) : null;
 
             return new ShaderInfoDto
             {
@@ -427,8 +429,9 @@ namespace TA.ReadOnlyUnityMcp
                 throw new InvalidOperationException("Shader name or GUID is required.");
             }
 
-            var materials = FindMaterialsForShader(shaderName);
-            var renderers = includeRenderers ? FindLoadedRenderersUsingShader(shaderName) : new List<object>();
+            var normalizedShaderPath = NormalizeAssetPath(assetPath);
+            var materials = FindMaterialsForShader(normalizedShaderPath, shaderName);
+            var renderers = includeRenderers ? FindLoadedRenderersUsingShader(normalizedShaderPath, shaderName) : new List<object>();
 
             return new
             {
@@ -438,6 +441,7 @@ namespace TA.ReadOnlyUnityMcp
                     path = assetPath,
                     guid = guid
                 },
+                matchMode = !string.IsNullOrWhiteSpace(normalizedShaderPath) ? "shaderAsset" : "shaderName",
                 materials,
                 materialCount = materials.Count,
                 renderers,
@@ -579,12 +583,12 @@ namespace TA.ReadOnlyUnityMcp
                 .ToList();
         }
 
-        private static List<object> FindLoadedRenderersUsingShader(string shaderName)
+        private static List<object> FindLoadedRenderersUsingShader(string shaderAssetPath, string shaderName)
         {
             return GetLoadedScenes()
                 .SelectMany(scene => scene.GetRootGameObjects())
                 .SelectMany(root => root.GetComponentsInChildren<Renderer>(true))
-                .Where(renderer => renderer.sharedMaterials.Any(material => material != null && material.shader != null && material.shader.name == shaderName))
+                .Where(renderer => renderer.sharedMaterials.Any(material => ShaderMatches(material?.shader, shaderAssetPath, shaderName)))
                 .Select(renderer => new
                 {
                     scene = renderer.gameObject.scene.path,
@@ -592,7 +596,7 @@ namespace TA.ReadOnlyUnityMcp
                     gameObjectPath = GetTransformPath(renderer.transform),
                     rendererType = renderer.GetType().FullName,
                     materials = renderer.sharedMaterials
-                        .Where(material => material != null && material.shader != null && material.shader.name == shaderName)
+                        .Where(material => ShaderMatches(material?.shader, shaderAssetPath, shaderName))
                         .Select(DescribeMaterialReference)
                         .ToList()
                 })
@@ -600,7 +604,7 @@ namespace TA.ReadOnlyUnityMcp
                 .ToList();
         }
 
-        private static List<MaterialReferenceDto> FindMaterialsForShader(string shaderName)
+        private static List<MaterialReferenceDto> FindMaterialsForShader(string shaderAssetPath, string shaderName)
         {
             var materials = AssetDatabase.GetAllAssetPaths()
                 .Where(path => path.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)
@@ -612,7 +616,7 @@ namespace TA.ReadOnlyUnityMcp
                     material = AssetDatabase.LoadAssetAtPath<Material>(path)
                 })
                 .Where(entry => entry.material != null)
-                .Where(entry => entry.material.shader != null && entry.material.shader.name == shaderName)
+                .Where(entry => ShaderMatches(entry.material.shader, shaderAssetPath, shaderName))
                 .Select(entry => new MaterialReferenceDto
                 {
                     name = entry.material.name,
@@ -623,6 +627,25 @@ namespace TA.ReadOnlyUnityMcp
                 .ToList();
 
             return materials;
+        }
+
+        private static bool ShaderMatches(Shader candidate, string shaderAssetPath, string shaderName)
+        {
+            if (candidate == null)
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(shaderAssetPath))
+            {
+                return string.Equals(
+                    NormalizeAssetPath(AssetDatabase.GetAssetPath(candidate)),
+                    shaderAssetPath,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            return !string.IsNullOrWhiteSpace(shaderName)
+                && string.Equals(candidate.name, shaderName, StringComparison.Ordinal);
         }
 
         private static object GetImportSettings(string assetPath)
@@ -731,21 +754,18 @@ namespace TA.ReadOnlyUnityMcp
 
             var adapter = new GraphSchemaAdapter();
             var text = File.ReadAllText(ToAbsoluteProjectPath(assetPath));
-            var envelope = adapter.BuildEnvelope(GraphEnvelopeReader.ParseObjects(text));
+            var parseResult = GraphEnvelopeReader.ParseObjects(text);
+            var envelope = adapter.BuildEnvelope(parseResult);
             var root = envelope.root;
             var objectMap = envelope.objectMap;
-            if (root == null)
-            {
-                throw new InvalidOperationException($"Shader Graph file at '{assetPath}' did not contain a parseable graph root.");
-            }
 
-            var properties = adapter.ResolveObjectList(root["m_Properties"], objectMap);
-            var keywords = adapter.ResolveObjectList(root["m_Keywords"], objectMap);
-            var categories = adapter.ResolveObjectList(root["m_CategoryData"], objectMap);
-            var groups = adapter.ResolveObjectList(root["m_GroupDatas"], objectMap);
-            var stickyNotes = adapter.ResolveObjectList(root["m_StickyNoteDatas"], objectMap);
-            var nodes = adapter.ResolveObjectList(root["m_Nodes"], objectMap);
-            var edges = adapter.ResolveObjectList(root["m_Edges"], objectMap);
+            var properties = root != null ? adapter.ResolveObjectList(root["m_Properties"], objectMap) : new List<JObject>();
+            var keywords = root != null ? adapter.ResolveObjectList(root["m_Keywords"], objectMap) : new List<JObject>();
+            var categories = root != null ? adapter.ResolveObjectList(root["m_CategoryData"], objectMap) : new List<JObject>();
+            var groups = root != null ? adapter.ResolveObjectList(root["m_GroupDatas"], objectMap) : new List<JObject>();
+            var stickyNotes = root != null ? adapter.ResolveObjectList(root["m_StickyNoteDatas"], objectMap) : new List<JObject>();
+            var nodes = root != null ? adapter.ResolveObjectList(root["m_Nodes"], objectMap) : new List<JObject>();
+            var edges = root != null ? adapter.ResolveObjectList(root["m_Edges"], objectMap) : new List<JObject>();
             var propertyIds = properties.Select(property => property.Value<string>("m_ObjectId")).Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet();
             var keywordIds = keywords.Select(keyword => keyword.Value<string>("m_ObjectId")).Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet();
             var nodeIds = nodes.Select(node => node.Value<string>("m_ObjectId")).Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet();
@@ -822,7 +842,7 @@ namespace TA.ReadOnlyUnityMcp
                 ["position"] = BuildPositionObject(note["m_Position"] as JObject)
             }));
 
-            var targetExports = new JArray(adapter.ResolveObjectList(root["m_ActiveTargets"], objectMap).Select(target => new JObject
+            var targetExports = new JArray((root != null ? adapter.ResolveObjectList(root["m_ActiveTargets"], objectMap) : new List<JObject>()).Select(target => new JObject
             {
                 ["objectId"] = target.Value<string>("m_ObjectId"),
                 ["type"] = target.Value<string>("m_Type"),
@@ -881,7 +901,8 @@ namespace TA.ReadOnlyUnityMcp
                 ["graph"] = new JObject
                 {
                     ["format"] = envelope.format,
-                    ["rootType"] = ToJToken(root.Value<string>("m_Type")),
+                    ["rootType"] = ToJToken(root?.Value<string>("m_Type")),
+                    ["parseError"] = ToJToken(envelope.parseError),
                     ["summary"] = new JObject
                     {
                         ["propertyCount"] = properties.Count,
@@ -922,9 +943,9 @@ namespace TA.ReadOnlyUnityMcp
                     ["targets"] = targetExports,
                     ["output"] = new JObject
                     {
-                        ["outputNode"] = BuildOutputNode(root["m_OutputNode"] as JObject, objectMap, adapter),
-                        ["vertexBlocks"] = BuildGraphBlocks(root["m_VertexContext"]?["m_Blocks"], objectMap, adapter),
-                        ["fragmentBlocks"] = BuildGraphBlocks(root["m_FragmentContext"]?["m_Blocks"], objectMap, adapter)
+                        ["outputNode"] = BuildOutputNode(root?["m_OutputNode"] as JObject, objectMap, adapter),
+                        ["vertexBlocks"] = BuildGraphBlocks(root?["m_VertexContext"]?["m_Blocks"], objectMap, adapter),
+                        ["fragmentBlocks"] = BuildGraphBlocks(root?["m_FragmentContext"]?["m_Blocks"], objectMap, adapter)
                     },
                     ["subGraphReferences"] = subGraphReferences,
                     ["warnings"] = new JArray(envelope.warnings ?? new List<string>())
@@ -942,7 +963,7 @@ namespace TA.ReadOnlyUnityMcp
                 ["textureId"] = GetTextureReference(textureProperty) != null ? textureId : null,
                 ["channel"] = ToJToken(channel),
                 ["rawPropertyNames"] = new JArray(rawPropertyNames),
-                ["uv"] = uv ?? JValue.CreateNull()
+                ["uv"] = ToJToken(uv)
             };
 
             if (extraFields != null)
@@ -1014,9 +1035,9 @@ namespace TA.ReadOnlyUnityMcp
             customSemanticGroups.Add(new JObject
             {
                 ["semantic"] = semantic,
-                ["textureId"] = GetTextureReference(textureProperty) != null ? GetTextureExportId(semantic) : JValue.CreateNull(),
+                ["textureId"] = ToJToken(GetTextureReference(textureProperty) != null ? GetTextureExportId(semantic) : null),
                 ["rawPropertyNames"] = new JArray(rawPropertyNames),
-                ["parameters"] = parameters ?? JValue.CreateNull()
+                ["parameters"] = ToJToken(parameters)
             });
         }
 
@@ -1113,26 +1134,106 @@ namespace TA.ReadOnlyUnityMcp
             return value != null ? JToken.FromObject(value) : JValue.CreateNull();
         }
 
+        private static float? GetColorAlphaValue(MaterialPropertyDto property)
+        {
+            return ToNullableFloat(ReadOptionalMember(property?.value, "a"));
+        }
+
         private static bool HasKeyword(IEnumerable<string> shaderKeywords, string keyword)
         {
             return shaderKeywords != null && shaderKeywords.Contains(keyword, StringComparer.OrdinalIgnoreCase);
         }
 
-        private static string InferPipeline(Shader shader)
+        private static string InferPipeline(Shader shader, string shaderPath = null)
         {
             if (shader == null)
             {
                 return null;
             }
 
-            if (shader.name.IndexOf("Universal Render Pipeline", StringComparison.OrdinalIgnoreCase) >= 0
-                || shader.name.IndexOf("Shader Graphs/", StringComparison.OrdinalIgnoreCase) >= 0
-                || !string.IsNullOrWhiteSpace(CompatServices.Context.renderPipelinePackageVersion))
+            var normalizedShaderPath = NormalizeAssetPath(shaderPath ?? AssetDatabase.GetAssetPath(shader));
+            var shaderName = shader.name ?? string.Empty;
+
+            if (shaderName.IndexOf("Universal Render Pipeline", StringComparison.OrdinalIgnoreCase) >= 0
+                || shaderName.IndexOf("Hidden/Universal Render Pipeline", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return "URP";
             }
 
+            if (shaderName.IndexOf("High Definition Render Pipeline", StringComparison.OrdinalIgnoreCase) >= 0
+                || shaderName.IndexOf("Hidden/HDRP", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "HDRP";
+            }
+
+            if (IsShaderGraphAssetPath(normalizedShaderPath))
+            {
+                var shaderGraphPipeline = InferShaderGraphPipeline(normalizedShaderPath);
+                if (!string.IsNullOrWhiteSpace(shaderGraphPipeline))
+                {
+                    return shaderGraphPipeline;
+                }
+
+                return "ShaderGraphOrUnknown";
+            }
+
+            var absoluteShaderPath = !string.IsNullOrWhiteSpace(normalizedShaderPath)
+                ? ToAbsoluteProjectPath(normalizedShaderPath)
+                : null;
+            if (!string.IsNullOrWhiteSpace(absoluteShaderPath) && File.Exists(absoluteShaderPath))
+            {
+                var sourceText = File.ReadAllText(absoluteShaderPath);
+                if (sourceText.IndexOf("com.unity.render-pipelines.universal", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return "URP";
+                }
+
+                if (sourceText.IndexOf("com.unity.render-pipelines.high-definition", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return "HDRP";
+                }
+            }
+
             return "BuiltInOrUnknown";
+        }
+
+        private static string InferShaderGraphPipeline(string shaderGraphPath)
+        {
+            try
+            {
+                var readResult = CompatServices.ShaderGraph.Read(shaderGraphPath);
+                foreach (var target in readResult.graph?.targets ?? new List<ShaderGraphTargetDto>())
+                {
+                    if (ContainsPipelineMarker(target.type, target.displayName, "Universal", "URP"))
+                    {
+                        return "URP";
+                    }
+
+                    if (ContainsPipelineMarker(target.type, target.displayName, "High Definition", "HDRP", "HDTarget"))
+                    {
+                        return "HDRP";
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static bool ContainsPipelineMarker(string primary, string secondary, params string[] markers)
+        {
+            foreach (var marker in markers)
+            {
+                if ((!string.IsNullOrWhiteSpace(primary) && primary.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                    || (!string.IsNullOrWhiteSpace(secondary) && secondary.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string InferShaderFamily(Shader shader)
@@ -1181,10 +1282,10 @@ namespace TA.ReadOnlyUnityMcp
         {
             return new JObject
             {
-                ["r"] = r,
-                ["g"] = g,
-                ["b"] = b,
-                ["a"] = a
+                ["r"] = ToJToken(r),
+                ["g"] = ToJToken(g),
+                ["b"] = ToJToken(b),
+                ["a"] = ToJToken(a)
             };
         }
 
@@ -1583,6 +1684,23 @@ namespace TA.ReadOnlyUnityMcp
 
             var field = type.GetField(memberName);
             return field?.GetValue(instance);
+        }
+
+        private static float? ToNullableFloat(object value)
+        {
+            switch (value)
+            {
+                case float floatValue:
+                    return floatValue;
+                case double doubleValue:
+                    return (float)doubleValue;
+                case int intValue:
+                    return intValue;
+                case long longValue:
+                    return longValue;
+                default:
+                    return null;
+            }
         }
 
         private sealed class GraphExportRecord

@@ -92,9 +92,12 @@ If you need a different port, set `UNITY_READONLY_MCP_PORT` or `UNITY_MCP_PORT` 
 
 - `get_scene_info` and `get_scene_renderers` only inspect currently loaded scenes in the Editor.
 - Shader Graph parsing is intentionally read-only and structure-focused.
+- Shader usage lookups are exact by shader asset when a shader path or GUID is available. Name-only lookups remain best-effort and can still be ambiguous if a project contains multiple shaders with the same `Shader.name`.
 - `get_material_export_spec` returns a transfer-oriented JSON spec, suggested export filenames, and optional recursive Shader Graph bundle data, but it does not write files or copy textures.
+- `get_material_export_spec` only maps base-map alpha to `opacity` when the material is transparent or alpha-clipped; opaque materials no longer claim opacity from base-map alpha by default.
 - `scripts/export-material-package.js` is the write-side bridge that consumes `get_material_export_spec` and writes `manifest.json`, optional Shader Graph bundle files, and copied textures into an output directory.
-- Shader Graph output is best-effort across Unity package versions; when schema details vary, raw structural metadata is still returned.
+- Shader Graph output is best-effort across Unity package versions; malformed or drifting graph files return stable JSON with `warnings` and, when needed, `parseError` instead of failing the whole route.
+- The Unity HTTP bridge is intended for local tooling, not browser clients. It does not enable cross-origin browser access, and `/health` avoids returning the project absolute path.
 
 ## Maintenance docs
 

@@ -25,8 +25,8 @@ namespace TA.ReadOnlyUnityMcp.Compat.ShaderGraph
 
         public ShaderGraphInfoDto Parse(string assetPath, string text)
         {
-            var objects = GraphEnvelopeReader.ParseObjects(text);
-            var envelope = adapter.BuildEnvelope(objects);
+            var parseResult = GraphEnvelopeReader.ParseObjects(text);
+            var envelope = adapter.BuildEnvelope(parseResult);
             var normalizer = new GraphNormalizer(adapter);
             return normalizer.Normalize(envelope);
         }
