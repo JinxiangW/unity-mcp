@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "export-material": "node scripts/export-material-package.js"
+    "export-material": "node scripts/export-material-package.js",
+    "summarize-shadergraph-io": "node scripts/summarize-shadergraph-io.js",
+    "test": "node --test"
   },
   "keywords": [
     "mcp",

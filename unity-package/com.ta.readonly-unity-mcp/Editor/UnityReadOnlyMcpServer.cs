@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Net;
 using System.Text;
@@ -12,8 +13,9 @@ namespace TA.ReadOnlyUnityMcp
 {
     internal sealed class UnityReadOnlyMcpServer
     {
-        private const int MainThreadTimeoutMs = 30000;
+        private static readonly int MainThreadTimeoutMs = ReadMainThreadTimeoutMs();
         private static readonly int Port = ReadPort();
+        private static readonly bool EnableRequestLogging = ReadRequestLoggingEnabled();
 
         private static readonly Lazy<UnityReadOnlyMcpServer> LazyInstance =
             new Lazy<UnityReadOnlyMcpServer>(() => new UnityReadOnlyMcpServer());
@@ -53,6 +55,14 @@ namespace TA.ReadOnlyUnityMcp
                 }
                 catch (Exception exception)
                 {
+                    if (IsExistingServerHealthy())
+                    {
+                        Debug.LogWarning($"[ReadOnlyUnityMcp] Listener already active on port {Port}; reusing existing server.");
+                        listener.Close();
+                        listener = null;
+                        return;
+                    }
+
                     Debug.LogError($"[ReadOnlyUnityMcp] Failed to start listener on port {Port}: {exception}");
                     listener.Close();
                     listener = null;
@@ -129,15 +139,31 @@ namespace TA.ReadOnlyUnityMcp
 
         private void ProcessRequest(HttpListenerContext context)
         {
+            var path = NormalizePath(context.Request.Url.AbsolutePath);
+            var startedUtc = DateTime.UtcNow;
+
             try
             {
                 if (context.Request.HttpMethod != "GET")
                 {
-                    WriteError(context.Response, 405, "Only GET is supported.");
+                    WriteError(context.Response, 405, new McpErrorResponse
+                    {
+                        code = "METHOD_NOT_ALLOWED",
+                        message = "Only GET is supported.",
+                        context = new
+                        {
+                            route = path,
+                            method = context.Request.HttpMethod
+                        }
+                    });
                     return;
                 }
 
-                var path = NormalizePath(context.Request.Url.AbsolutePath);
+                if (EnableRequestLogging)
+                {
+                    Debug.Log($"[ReadOnlyUnityMcp] Request {path} {BuildQuerySummary(context.Request.QueryString)}");
+                }
+
                 object payload;
 
                 switch (path)
@@ -147,7 +173,15 @@ namespace TA.ReadOnlyUnityMcp
                         {
                             service = "readonly-unity-mcp",
                             version = "0.1.0",
-                            unityVersion = Application.unityVersion
+                            unityVersion = Application.unityVersion,
+                            timeoutMs = MainThreadTimeoutMs,
+                            compatibility = new
+                            {
+                                shaderGraphPackageVersion = Compat.CompatServices.Context.shaderGraphPackageVersion,
+                                renderPipelinePackageVersion = Compat.CompatServices.Context.renderPipelinePackageVersion,
+                                hasVolumeType = Compat.CompatServices.Context.hasVolumeType,
+                                hasShaderGraphAssembly = Compat.CompatServices.Context.hasShaderGraphAssembly
+                            }
                         }, MainThreadTimeoutMs);
                         break;
 
@@ -210,6 +244,10 @@ namespace TA.ReadOnlyUnityMcp
                             GetString(context.Request.QueryString, "guid")), MainThreadTimeoutMs);
                         break;
 
+                    case "/api/pipeline/info":
+                        payload = UnityReadOnlyMcpMainThread.Invoke(UnityReadOnlyMcpQueries.GetRenderPipelineInfo, MainThreadTimeoutMs);
+                        break;
+
                     case "/api/scenes/info":
                         payload = UnityReadOnlyMcpMainThread.Invoke(UnityReadOnlyMcpQueries.GetSceneInfo, MainThreadTimeoutMs);
                         break;
@@ -219,8 +257,56 @@ namespace TA.ReadOnlyUnityMcp
                             GetString(context.Request.QueryString, "scenePath")), MainThreadTimeoutMs);
                         break;
 
+                    case "/api/scenes/lights":
+                        payload = UnityReadOnlyMcpMainThread.Invoke(() => UnityReadOnlyMcpQueries.GetSceneLights(
+                            GetString(context.Request.QueryString, "scenePath"),
+                            GetString(context.Request.QueryString, "layers"),
+                            GetString(context.Request.QueryString, "tag")), MainThreadTimeoutMs);
+                        break;
+
+                    case "/api/scenes/volumes":
+                        payload = UnityReadOnlyMcpMainThread.Invoke(() => UnityReadOnlyMcpQueries.GetSceneVolumes(
+                            GetString(context.Request.QueryString, "scenePath"),
+                            GetString(context.Request.QueryString, "layers"),
+                            GetString(context.Request.QueryString, "tag")), MainThreadTimeoutMs);
+                        break;
+
+                    case "/api/prefabs/info":
+                        payload = UnityReadOnlyMcpMainThread.Invoke(() => UnityReadOnlyMcpQueries.GetPrefabInfo(
+                            GetString(context.Request.QueryString, "path"),
+                            GetString(context.Request.QueryString, "guid")), MainThreadTimeoutMs);
+                        break;
+
+                    case "/api/textures/info":
+                        payload = UnityReadOnlyMcpMainThread.Invoke(() => UnityReadOnlyMcpQueries.GetTextureInfo(
+                            GetString(context.Request.QueryString, "path"),
+                            GetString(context.Request.QueryString, "guid")), MainThreadTimeoutMs);
+                        break;
+
+                    case "/api/animations/info":
+                        payload = UnityReadOnlyMcpMainThread.Invoke(() => UnityReadOnlyMcpQueries.GetAnimationInfo(
+                            GetString(context.Request.QueryString, "path"),
+                            GetString(context.Request.QueryString, "guid")), MainThreadTimeoutMs);
+                        break;
+
+                    case "/api/project/settings":
+                        payload = UnityReadOnlyMcpMainThread.Invoke(UnityReadOnlyMcpQueries.GetProjectSettings, MainThreadTimeoutMs);
+                        break;
+
+                    case "/api/project/packages":
+                        payload = UnityReadOnlyMcpMainThread.Invoke(UnityReadOnlyMcpQueries.GetProjectPackages, MainThreadTimeoutMs);
+                        break;
+
                     default:
-                        WriteError(context.Response, 404, $"Unknown route: {path}");
+                        WriteError(context.Response, 404, new McpErrorResponse
+                        {
+                            code = "UNKNOWN_ROUTE",
+                            message = $"Unknown route: {path}",
+                            context = new
+                            {
+                                route = path
+                            }
+                        });
                         return;
                 }
 
@@ -230,10 +316,41 @@ namespace TA.ReadOnlyUnityMcp
                     data = payload,
                     timestampUtc = DateTime.UtcNow.ToString("O")
                 });
+
+                if (EnableRequestLogging)
+                {
+                    Debug.Log($"[ReadOnlyUnityMcp] Response {path} {(DateTime.UtcNow - startedUtc).TotalMilliseconds:F0}ms");
+                }
             }
             catch (Exception exception)
             {
-                WriteError(context.Response, 500, exception.Message, exception.ToString());
+                var error = McpErrorResponse.FromException(exception, path, context.Request.QueryString);
+                var statusCode = error.code == "ASSET_NOT_FOUND" ? 404 : error.code == "INVALID_REQUEST" || error.code == "INVALID_ARGUMENT" ? 400 : error.code == "TIMEOUT" ? 504 : 500;
+                WriteError(context.Response, statusCode, error);
+
+                if (EnableRequestLogging)
+                {
+                    Debug.LogWarning($"[ReadOnlyUnityMcp] Error {path} {error.code} {(DateTime.UtcNow - startedUtc).TotalMilliseconds:F0}ms {error.message}");
+                }
+            }
+        }
+
+        private static bool IsExistingServerHealthy()
+        {
+            try
+            {
+                var request = WebRequest.CreateHttp($"http://127.0.0.1:{Port}/health");
+                request.Method = "GET";
+                request.Timeout = 1000;
+                request.ReadWriteTimeout = 1000;
+                using (var response = (HttpWebResponse)request.GetResponse())
+                {
+                    return response.StatusCode == HttpStatusCode.OK;
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -252,13 +369,15 @@ namespace TA.ReadOnlyUnityMcp
             }
         }
 
-        private static void WriteError(HttpListenerResponse response, int statusCode, string error, string details = null)
+        private static void WriteError(HttpListenerResponse response, int statusCode, McpErrorResponse error)
         {
             WriteJson(response, statusCode, new
             {
                 ok = false,
-                error,
-                details,
+                error = error.message,
+                errorCode = error.code,
+                context = error.context,
+                details = error.details,
                 timestampUtc = DateTime.UtcNow.ToString("O")
             });
         }
@@ -314,6 +433,51 @@ namespace TA.ReadOnlyUnityMcp
             }
 
             return 51234;
+        }
+
+        private static int ReadMainThreadTimeoutMs()
+        {
+            var value = Environment.GetEnvironmentVariable("UNITY_MCP_TIMEOUT_MS");
+            if (int.TryParse(value, out var timeoutMs) && timeoutMs >= 1000)
+            {
+                return timeoutMs + 5000;
+            }
+
+            return 30000;
+        }
+
+        private static bool ReadRequestLoggingEnabled()
+        {
+            var value = Environment.GetEnvironmentVariable("UNITY_MCP_LOG_REQUESTS");
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            return value.Equals("1", StringComparison.OrdinalIgnoreCase)
+                   || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                   || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildQuerySummary(NameValueCollection query)
+        {
+            if (query == null || query.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var parts = new List<string>();
+            foreach (var key in query.AllKeys)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                parts.Add($"{key}={query[key]}");
+            }
+
+            return parts.Count == 0 ? string.Empty : $"?{string.Join("&", parts.ToArray())}";
         }
     }
 

@@ -11,6 +11,7 @@ Build a small, stable, read-only Unity MCP for rendering TA workflows in Unity 6
 File: `src/index.js`
 
 - Exposes stdio MCP tools
+- Registers domain-specific tool modules from `src/tools/`
 - Validates user input shape
 - Forwards requests to Unity local HTTP service
 - Normalizes a small amount of output when Unity returns noisy results
@@ -57,7 +58,10 @@ File: `unity-package/com.ta.readonly-unity-mcp/Editor/UnityShaderGraphTextParser
 - Material export: transferable semantics, texture export planning, optional recursive Shader Graph bundle data
 - Shader: properties, keywords, passes, usage lookup
 - Shader Graph: properties, keywords, nodes, edges, subgraphs, targets
-- Scene: active/loaded scenes, renderer-material bindings, lights, probes, volumes
+- Scene: active/loaded scenes, renderer-material bindings, filtered lights and volumes
+- Pipeline: active render pipeline asset and quality-level pipeline bindings
+- Prefab: hierarchy, components, and material references
+- Texture: importer settings and platform overrides
 
 ## Recommended growth order
 

@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using Newtonsoft.Json.Linq;
 using TA.ReadOnlyUnityMcp.Compat;
 using TA.ReadOnlyUnityMcp.Compat.Shader;
 using TA.ReadOnlyUnityMcp.Compat.ShaderGraph;
 using TA.ReadOnlyUnityMcp.Contracts;
 using UnityEditor;
+using UnityEditor.Animations;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
@@ -33,7 +35,7 @@ namespace TA.ReadOnlyUnityMcp
                 } : null,
                 dependencies = includeDependencies ? GetDependencyReferences(assetPath, false) : null,
                 referencedBy = includeReferencedBy ? FindAssetsReferencing(assetPath) : null,
-                importSettings = GetImportSettings(assetPath)
+                importSettings = MaterialExportSpecBuilder.GetImportSettings(assetPath)
             };
         }
 
@@ -113,263 +115,7 @@ namespace TA.ReadOnlyUnityMcp
                 throw new InvalidOperationException($"Asset at '{assetPath}' is not a Material.");
             }
 
-            exportProfile = string.IsNullOrWhiteSpace(exportProfile) ? "ue-pbr" : exportProfile.Trim();
-
-            var properties = CompatServices.Shader.ReadMaterialProperties(material);
-            var propertyMap = properties.ToDictionary(property => property.name, StringComparer.Ordinal);
-            var shader = material.shader;
-            var shaderPath = shader != null ? AssetDatabase.GetAssetPath(shader) : null;
-            var isShaderGraph = IsShaderGraphAssetPath(shaderPath);
-            var warnings = new JArray();
-
-            if (shader == null)
-            {
-                warnings.Add(BuildWarning("MATERIAL_WITHOUT_SHADER", "Material does not reference a shader.", "error"));
-            }
-
-            var baseColorProperty = FindProperty(propertyMap, "_BaseColor");
-            var baseMapProperty = FindProperty(propertyMap, "_BaseMap");
-            var normalMapProperty = FindProperty(propertyMap, "_BumpMap");
-            var metallicProperty = FindProperty(propertyMap, "_Metallic");
-            var metallicMapProperty = FindProperty(propertyMap, "_MetallicGlossMap");
-            var smoothnessProperty = FindProperty(propertyMap, "_Smoothness");
-            var occlusionMapProperty = FindProperty(propertyMap, "_OcclusionMap");
-            var occlusionStrengthProperty = FindProperty(propertyMap, "_OcclusionStrength");
-            var emissionToggleProperty = FindProperty(propertyMap, "_Use_Emission");
-            var emissionMapProperty = FindProperty(propertyMap, "_EmissionMap");
-            var emissionColorProperty = FindProperty(propertyMap, "_EmissionColor");
-            var guideTextureProperty = FindProperty(propertyMap, "_GuideTexture");
-            var guideTilingProperty = FindProperty(propertyMap, "_GuideTiling");
-            var guideStrengthProperty = FindProperty(propertyMap, "_GuideStrength");
-            var tilingProperty = FindProperty(propertyMap, "_Tiling");
-            var offsetProperty = FindProperty(propertyMap, "_Offset");
-            var cutoffProperty = FindProperty(propertyMap, "_Cutoff");
-            var metallicTextureToggleProperty = FindProperty(propertyMap, "_Use_Metallic_Texture");
-
-            var smoothness = GetFloatValue(smoothnessProperty);
-            var roughness = smoothness.HasValue ? 1f - smoothness.Value : (float?)null;
-            var alphaClip = HasKeyword(material.shaderKeywords, "_BUILTIN_AlphaClip")
-                            || HasKeyword(material.shaderKeywords, "_BUILTIN_ALPHATEST_ON")
-                            || (GetFloatValue(cutoffProperty) ?? 0f) > 0f;
-            var surfaceType = material.renderQueue >= 3000 ? "Transparent" : "Opaque";
-            var blendMode = alphaClip ? "Masked" : (material.renderQueue >= 3000 ? "Translucent" : "Opaque");
-            var twoSided = HasKeyword(material.shaderKeywords, "_DOUBLESIDED_ON") || material.doubleSidedGI;
-            var pipeline = InferPipeline(shader, shaderPath);
-            var transferMode = isShaderGraph ? "custom_graph_needed" : "material_instance";
-            var confidence = isShaderGraph ? 0.45 : 0.9;
-            var usesBaseMapAlphaAsOpacity = alphaClip || string.Equals(surfaceType, "Transparent", StringComparison.OrdinalIgnoreCase);
-            var opacityValue = usesBaseMapAlphaAsOpacity ? (GetColorAlphaValue(baseColorProperty) ?? 1f) : 1f;
-
-            if (isShaderGraph)
-            {
-                warnings.Add(BuildWarning(
-                    "CUSTOM_SHADERGRAPH_MATERIAL",
-                    $"{material.name} uses the custom Shader Graph '{shader.name}'; only the transferable PBR subset is normalized for export.",
-                    "warning"));
-            }
-
-            if (metallicTextureToggleProperty != null && (GetFloatValue(metallicTextureToggleProperty) ?? 0f) > 0f && GetTextureReference(metallicMapProperty) == null)
-            {
-                warnings.Add(BuildWarning(
-                    "METALLIC_TEXTURE_MISSING",
-                    "The shader exposes a metallic texture toggle, but no metallic texture is assigned on this material instance.",
-                    "warning"));
-            }
-
-            if (roughness.HasValue)
-            {
-                warnings.Add(BuildWarning(
-                    "ROUGHNESS_DERIVED_FROM_SMOOTHNESS",
-                    "Roughness is derived as 1 - Unity smoothness because no dedicated roughness texture was assigned.",
-                    "info"));
-            }
-
-            if (alphaClip && GetTextureReference(baseMapProperty) != null)
-            {
-                warnings.Add(BuildWarning(
-                    "ALPHA_FROM_BASEMAP_INFERENCE",
-                    "Opacity/alpha clip is inferred from the base map alpha because no dedicated opacity texture slot exists.",
-                    "info"));
-            }
-
-            var textures = new JArray();
-            AddTextureExport(textures, material.name, "baseColor", "_BaseMap", baseMapProperty, BuildChannelPacking("baseColor.r", "baseColor.g", "baseColor.b", usesBaseMapAlphaAsOpacity ? "opacity" : null));
-            AddTextureExport(textures, material.name, "normal", "_BumpMap", normalMapProperty, new JObject { ["rgb"] = "normal" });
-            AddTextureExport(textures, material.name, "metallicRoughnessMask", "_MetallicGlossMap", metallicMapProperty, new JObject { ["r"] = "metallic", ["a"] = "smoothness" });
-            AddTextureExport(textures, material.name, "occlusion", "_OcclusionMap", occlusionMapProperty, new JObject { ["g"] = "occlusion" });
-            AddTextureExport(textures, material.name, "emission", "_EmissionMap", emissionMapProperty, new JObject { ["rgb"] = "emission" });
-            AddTextureExport(textures, material.name, "custom.guideTexture", "_GuideTexture", guideTextureProperty, new JObject { ["rgba"] = "custom.guideTexture" });
-
-            var customSemanticGroups = new JArray();
-            AddCustomSemanticGroup(customSemanticGroups, "custom.guideTexture", guideTextureProperty, new[] { "_GuideTexture", "_GuideTiling", "_GuideStrength" }, new JObject
-            {
-                ["guideTiling"] = ToJToken(GetFloatValue(guideTilingProperty)),
-                ["guideStrength"] = ToJToken(GetFloatValue(guideStrengthProperty))
-            });
-            AddCustomSemanticGroup(customSemanticGroups, "dissolve", null, new[]
-            {
-                "_Invert",
-                "_UseBackColor",
-                "_BackColor",
-                "_UseDithering",
-                "_EdgeColor",
-                "_EdgeWidth",
-                "_EdgeSmoothness",
-                "_AffectAlbedo",
-                "_GlareColor",
-                "_GlareGuideStrength",
-                "_GlareWidth",
-                "_GlareSmoothness",
-                "_GlareOffset"
-            }, null);
-            AddCustomSemanticGroup(customSemanticGroups, "displacement", null, new[]
-            {
-                "_DisplacementPerVertex",
-                "_DisplacementSmoothness",
-                "_DisplacementOffset",
-                "_RotationAxis",
-                "_RotationMin",
-                "_RotationMax",
-                "_RandomPositionOffset",
-                "_PositionOffset",
-                "_Scale",
-                "_NormalOffset"
-            }, null);
-
-            var spec = new JObject
-            {
-                ["schemaVersion"] = "unity-material-export-spec/1.0",
-                ["exportProfile"] = exportProfile,
-                ["exportedAtUtc"] = DateTime.UtcNow.ToString("O"),
-                ["unityContext"] = new JObject
-                {
-                    ["unityVersion"] = Application.unityVersion,
-                    ["projectPath"] = Directory.GetCurrentDirectory().Replace('\\', '/'),
-                    ["renderPipelinePackageVersion"] = ToJToken(CompatServices.Context.renderPipelinePackageVersion),
-                    ["shaderGraphPackageVersion"] = ToJToken(CompatServices.Context.shaderGraphPackageVersion)
-                },
-                ["material"] = JObject.FromObject(new
-                {
-                    name = material.name,
-                    path = assetPath,
-                    guid = AssetDatabase.AssetPathToGUID(assetPath),
-                    assetType = material.GetType().FullName
-                }),
-                ["shader"] = shader != null ? JObject.FromObject(new
-                {
-                    name = shader.name,
-                    path = shaderPath,
-                    guid = string.IsNullOrWhiteSpace(shaderPath) ? null : AssetDatabase.AssetPathToGUID(shaderPath),
-                    isShaderGraph,
-                    shaderFamily = isShaderGraph ? "CustomLit" : InferShaderFamily(shader),
-                    pipeline
-                }) : JValue.CreateNull(),
-                ["classification"] = new JObject
-                {
-                    ["supported"] = true,
-                    ["transferMode"] = transferMode,
-                    ["confidence"] = confidence,
-                    ["targetModel"] = exportProfile,
-                    ["notes"] = new JArray(BuildClassificationNotes(isShaderGraph, includeShaderGraph, recursiveShaderGraphs))
-                },
-                ["surface"] = new JObject
-                {
-                    ["surfaceType"] = surfaceType,
-                    ["blendMode"] = blendMode,
-                    ["alphaClip"] = alphaClip,
-                    ["alphaCutoff"] = ToJToken(GetFloatValue(cutoffProperty)),
-                    ["twoSided"] = twoSided,
-                    ["cullMode"] = JValue.CreateNull(),
-                    ["renderQueue"] = material.renderQueue,
-                    ["enableInstancing"] = material.enableInstancing,
-                    ["doubleSidedGI"] = material.doubleSidedGI,
-                    ["globalIlluminationFlags"] = material.globalIlluminationFlags.ToString()
-                },
-                ["semantics"] = new JObject
-                {
-                    ["baseColor"] = BuildTextureSemantic(
-                        baseMapProperty,
-                        "baseColor",
-                        new[] { "_BaseColor", "_BaseMap" },
-                        baseColorProperty != null ? ToJToken(baseColorProperty.value) : JValue.CreateNull(),
-                        null,
-                        BuildUvTransform(baseMapProperty)),
-                    ["normal"] = BuildTextureSemantic(
-                        normalMapProperty,
-                        "normal",
-                        new[] { "_BumpMap" },
-                        JValue.CreateNull(),
-                        null,
-                        BuildUvTransform(normalMapProperty),
-                        new JObject { ["scale"] = 1.0 }),
-                    ["metallic"] = new JObject
-                    {
-                        ["value"] = ToJToken(GetFloatValue(metallicProperty)),
-                        ["textureId"] = GetTextureReference(metallicMapProperty) != null ? "metallicRoughnessMask" : null,
-                        ["channel"] = GetTextureReference(metallicMapProperty) != null ? "r" : null,
-                        ["rawPropertyNames"] = new JArray("_Metallic", "_MetallicGlossMap", "_Use_Metallic_Texture")
-                    },
-                    ["roughness"] = new JObject
-                    {
-                        ["value"] = ToJToken(roughness),
-                        ["source"] = roughness.HasValue ? "derived_from_smoothness" : null,
-                        ["textureId"] = GetTextureReference(metallicMapProperty) != null ? "metallicRoughnessMask" : null,
-                        ["channel"] = GetTextureReference(metallicMapProperty) != null ? "a" : null,
-                        ["rawPropertyNames"] = new JArray("_Smoothness", "_MetallicGlossMap"),
-                        ["conversion"] = roughness.HasValue ? new JObject
-                        {
-                            ["kind"] = "one_minus_smoothness",
-                            ["sourceValue"] = ToJToken(smoothness)
-                        } : JValue.CreateNull()
-                    },
-                    ["emission"] = new JObject
-                    {
-                        ["enabled"] = (GetFloatValue(emissionToggleProperty) ?? 0f) > 0f,
-                        ["color"] = emissionColorProperty != null ? ToJToken(emissionColorProperty.value) : JValue.CreateNull(),
-                        ["textureId"] = GetTextureReference(emissionMapProperty) != null ? "emission" : null,
-                        ["rawPropertyNames"] = new JArray("_Use_Emission", "_EmissionColor", "_EmissionMap")
-                    },
-                    ["opacity"] = new JObject
-                    {
-                        ["value"] = opacityValue,
-                        ["textureId"] = usesBaseMapAlphaAsOpacity && GetTextureReference(baseMapProperty) != null ? "baseColor" : null,
-                        ["channel"] = usesBaseMapAlphaAsOpacity && GetTextureReference(baseMapProperty) != null ? "a" : null,
-                        ["rawPropertyNames"] = new JArray("_BaseMap", "_Cutoff")
-                    },
-                    ["occlusion"] = new JObject
-                    {
-                        ["value"] = ToJToken(GetFloatValue(occlusionStrengthProperty)),
-                        ["textureId"] = GetTextureReference(occlusionMapProperty) != null ? "occlusion" : null,
-                        ["channel"] = GetTextureReference(occlusionMapProperty) != null ? "g" : null,
-                        ["rawPropertyNames"] = new JArray("_OcclusionMap", "_OcclusionStrength")
-                    },
-                    ["uvTransform"] = new JObject
-                    {
-                        ["value"] = new JObject
-                        {
-                            ["tiling"] = tilingProperty != null ? ToJToken(tilingProperty.value) : JValue.CreateNull(),
-                            ["offset"] = offsetProperty != null ? ToJToken(offsetProperty.value) : JValue.CreateNull()
-                        },
-                        ["rawPropertyNames"] = new JArray("_Tiling", "_Offset")
-                    },
-                    ["custom"] = customSemanticGroups
-                },
-                ["textures"] = textures,
-                ["keywords"] = new JObject
-                {
-                    ["activeMaterialKeywords"] = new JArray(material.shaderKeywords ?? Array.Empty<string>()),
-                    ["declaredShaderKeywords"] = shader != null ? new JArray(CompatServices.Shader.ReadKeywords(shader).Select(keyword => keyword.name)) : new JArray()
-                },
-                ["unityRawProperties"] = includeRawProperties ? BuildRawPropertyExports(properties) : new JArray(),
-                ["warnings"] = warnings
-            };
-
-            if (includeShaderGraph && isShaderGraph && !string.IsNullOrWhiteSpace(shaderPath))
-            {
-                spec["shaderGraph"] = BuildShaderGraphSection(shaderPath, recursiveShaderGraphs);
-            }
-
-            return spec;
+            return MaterialExportSpecBuilder.Build(material, assetPath, exportProfile, includeShaderGraph, recursiveShaderGraphs, includeRawProperties);
         }
 
         public static object GetShaderInfo(string path, string guid, bool includeUsage)
@@ -474,6 +220,46 @@ namespace TA.ReadOnlyUnityMcp
             };
         }
 
+        public static object GetRenderPipelineInfo()
+        {
+            var activePipeline = GraphicsSettings.currentRenderPipeline ?? QualitySettings.renderPipeline;
+            var defaultPipeline = GraphicsSettings.defaultRenderPipeline;
+            var activeQualityLevel = QualitySettings.GetQualityLevel();
+            var qualityNames = QualitySettings.names ?? Array.Empty<string>();
+
+            return new
+            {
+                activePipeline = DescribeRenderPipelineAsset(activePipeline),
+                defaultPipeline = DescribeRenderPipelineAsset(defaultPipeline),
+                activeQualityLevel = activeQualityLevel >= 0 && activeQualityLevel < qualityNames.Length ? qualityNames[activeQualityLevel] : null,
+                qualityLevels = qualityNames.Select((qualityName, index) => new
+                {
+                    name = qualityName,
+                    index,
+                    isActive = index == activeQualityLevel,
+                    renderPipeline = DescribeRenderPipelineAsset(ReadQualityRenderPipeline(index))
+                }).ToList(),
+                activeQualitySettings = new
+                {
+                    antiAliasing = QualitySettings.antiAliasing,
+                    anisotropicFiltering = QualitySettings.anisotropicFiltering.ToString(),
+                    lodBias = QualitySettings.lodBias,
+                    masterTextureLimit = QualitySettings.masterTextureLimit,
+                    maximumLODLevel = QualitySettings.maximumLODLevel,
+                    pixelLightCount = QualitySettings.pixelLightCount,
+                    realtimeReflectionProbes = QualitySettings.realtimeReflectionProbes,
+                    softParticles = QualitySettings.softParticles,
+                    softVegetation = QualitySettings.softVegetation,
+                    shadowCascades = QualitySettings.shadowCascades,
+                    shadowDistance = QualitySettings.shadowDistance,
+                    shadowProjection = QualitySettings.shadowProjection.ToString(),
+                    shadowResolution = QualitySettings.shadowResolution.ToString(),
+                    shadows = QualitySettings.shadows.ToString(),
+                    vSyncCount = QualitySettings.vSyncCount
+                }
+            };
+        }
+
         public static object GetSceneInfo()
         {
             var scenes = GetLoadedScenes();
@@ -493,18 +279,69 @@ namespace TA.ReadOnlyUnityMcp
             };
         }
 
+        public static object GetSceneLights(string scenePath, string layers, string tag)
+        {
+            var layerFilters = ParseCsvValues(layers);
+            var scenes = GetFilteredScenes(scenePath);
+
+            return new
+            {
+                sceneCount = scenes.Count,
+                filters = new
+                {
+                    scenePath = NormalizeAssetPath(scenePath),
+                    layers = layerFilters,
+                    tag = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim()
+                },
+                scenes = scenes.Select(scene => new
+                {
+                    name = scene.name,
+                    path = scene.path,
+                    lightCount = scene.GetRootGameObjects()
+                        .SelectMany(root => root.GetComponentsInChildren<Light>(true))
+                        .Count(light => MatchesSceneObjectFilter(light.gameObject, layerFilters, tag)),
+                    lights = scene.GetRootGameObjects()
+                        .SelectMany(root => root.GetComponentsInChildren<Light>(true))
+                        .Where(light => MatchesSceneObjectFilter(light.gameObject, layerFilters, tag))
+                        .Select(DescribeLight)
+                        .ToList()
+                }).ToList()
+            };
+        }
+
+        public static object GetSceneVolumes(string scenePath, string layers, string tag)
+        {
+            var layerFilters = ParseCsvValues(layers);
+            var scenes = GetFilteredScenes(scenePath);
+
+            return new
+            {
+                sceneCount = scenes.Count,
+                filters = new
+                {
+                    scenePath = NormalizeAssetPath(scenePath),
+                    layers = layerFilters,
+                    tag = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim()
+                },
+                scenes = scenes.Select(scene => new
+                {
+                    name = scene.name,
+                    path = scene.path,
+                    volumeCount = scene.GetRootGameObjects()
+                        .SelectMany(GetVolumeComponents)
+                        .Count(volume => MatchesSceneObjectFilter(volume.gameObject, layerFilters, tag)),
+                    volumes = scene.GetRootGameObjects()
+                        .SelectMany(GetVolumeComponents)
+                        .Where(volume => MatchesSceneObjectFilter(volume.gameObject, layerFilters, tag))
+                        .Select(DescribeVolume)
+                        .ToList()
+                }).ToList()
+            };
+        }
+
         public static object GetSceneRenderers(string scenePath)
         {
-            var scenes = GetLoadedScenes();
-            if (!string.IsNullOrWhiteSpace(scenePath))
-            {
-                scenes = scenes.Where(scene => string.Equals(scene.path, NormalizeAssetPath(scenePath), StringComparison.OrdinalIgnoreCase)).ToList();
-            }
-
-            if (scenes.Count == 0)
-            {
-                throw new InvalidOperationException("No loaded scenes matched the requested scene path.");
-            }
+            var scenes = GetFilteredScenes(scenePath);
 
             return new
             {
@@ -515,6 +352,189 @@ namespace TA.ReadOnlyUnityMcp
                     path = scene.path,
                     renderers = GetSceneRendererEntries(scene)
                 }).ToList()
+            };
+        }
+
+        public static object GetPrefabInfo(string path, string guid)
+        {
+            var assetPath = ResolveAssetPath(path, guid);
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
+            if (prefab == null)
+            {
+                throw new InvalidOperationException($"Asset at '{assetPath}' is not a Prefab.");
+            }
+
+            return new
+            {
+                asset = DescribeAssetReference(assetPath),
+                prefabAssetType = PrefabUtility.GetPrefabAssetType(prefab).ToString(),
+                prefabInstanceStatus = PrefabUtility.GetPrefabInstanceStatus(prefab).ToString(),
+                hierarchy = DescribePrefabNode(prefab.transform, prefab.name),
+                materialReferences = prefab.GetComponentsInChildren<Renderer>(true)
+                    .SelectMany(renderer => renderer.sharedMaterials.Where(material => material != null))
+                    .Distinct()
+                    .Select(DescribeMaterialReference)
+                    .ToList()
+            };
+        }
+
+        public static object GetTextureInfo(string path, string guid)
+        {
+            var assetPath = ResolveAssetPath(path, guid);
+            var texture = AssetDatabase.LoadAssetAtPath<Texture>(assetPath);
+            if (texture == null)
+            {
+                throw new InvalidOperationException($"Asset at '{assetPath}' is not a Texture.");
+            }
+
+            return new
+            {
+                asset = DescribeTextureReference(texture),
+                width = texture.width,
+                height = texture.height,
+                dimension = texture.dimension.ToString(),
+                mipmapCount = texture.mipmapCount,
+                graphicsFormat = texture.graphicsFormat.ToString(),
+                importSettings = MaterialExportSpecBuilder.GetImportSettings(assetPath),
+                referencedBy = FindAssetsReferencing(assetPath)
+            };
+        }
+
+        public static object GetAnimationInfo(string path, string guid)
+        {
+            var assetPath = ResolveAssetPath(path, guid);
+
+            var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(assetPath);
+            if (controller != null)
+            {
+                return new
+                {
+                    asset = DescribeAssetReference(assetPath),
+                    kind = "AnimatorController",
+                    layers = controller.layers.Select(layer => new
+                    {
+                        name = layer.name,
+                        defaultWeight = layer.defaultWeight,
+                        blendingMode = layer.blendingMode.ToString(),
+                        stateMachine = new
+                        {
+                            states = layer.stateMachine.states.Select(state => new
+                            {
+                                name = state.state.name,
+                                speed = state.state.speed,
+                                tag = state.state.tag,
+                                motion = state.state.motion != null ? state.state.motion.name : null,
+                                writeDefaultValues = state.state.writeDefaultValues
+                            }).ToList()
+                        }
+                    }).ToList(),
+                    parameters = controller.parameters.Select(parameter => new
+                    {
+                        name = parameter.name,
+                        type = parameter.type.ToString(),
+                        defaultBool = parameter.defaultBool,
+                        defaultFloat = parameter.defaultFloat,
+                        defaultInt = parameter.defaultInt
+                    }).ToList()
+                };
+            }
+
+            var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(assetPath);
+            if (clip != null)
+            {
+                var clipSettings = AnimationUtility.GetAnimationClipSettings(clip);
+                return new
+                {
+                    asset = DescribeAssetReference(assetPath),
+                    kind = "AnimationClip",
+                    length = clip.length,
+                    frameRate = clip.frameRate,
+                    legacy = clip.legacy,
+                    loopTime = clipSettings.loopTime,
+                    curveBindings = AnimationUtility.GetCurveBindings(clip).Select(binding => new
+                    {
+                        path = binding.path,
+                        propertyName = binding.propertyName,
+                        type = binding.type.FullName
+                    }).ToList(),
+                    objectReferenceBindings = AnimationUtility.GetObjectReferenceCurveBindings(clip).Select(binding => new
+                    {
+                        path = binding.path,
+                        propertyName = binding.propertyName,
+                        type = binding.type.FullName
+                    }).ToList(),
+                    events = AnimationUtility.GetAnimationEvents(clip).Select(animationEvent => new
+                    {
+                        functionName = animationEvent.functionName,
+                        time = animationEvent.time,
+                        floatParameter = animationEvent.floatParameter,
+                        intParameter = animationEvent.intParameter,
+                        stringParameter = animationEvent.stringParameter
+                    }).ToList()
+                };
+            }
+
+            throw new InvalidOperationException($"Asset at '{assetPath}' is not an AnimatorController or AnimationClip.");
+        }
+
+        public static object GetProjectSettings()
+        {
+            var buildTarget = EditorUserBuildSettings.activeBuildTarget;
+            var buildTargetGroup = BuildPipeline.GetBuildTargetGroup(buildTarget);
+
+            return new
+            {
+                playerSettings = new
+                {
+                    companyName = PlayerSettings.companyName,
+                    productName = PlayerSettings.productName,
+                    colorSpace = PlayerSettings.colorSpace.ToString(),
+                    activeInputHandling = ReadStaticPropertyValue(typeof(PlayerSettings), "activeInputHandler"),
+                    scriptingBackend = PlayerSettings.GetScriptingBackend(buildTargetGroup).ToString(),
+                    graphicsJobs = PlayerSettings.graphicsJobs
+                },
+                editorBuild = new
+                {
+                    activeBuildTarget = buildTarget.ToString(),
+                    activeBuildTargetGroup = buildTargetGroup.ToString(),
+                    development = EditorUserBuildSettings.development,
+                    connectProfiler = EditorUserBuildSettings.connectProfiler
+                },
+                graphicsSettings = new
+                {
+                    defaultRenderPipeline = DescribeRenderPipelineAsset(GraphicsSettings.defaultRenderPipeline),
+                    currentRenderPipeline = DescribeRenderPipelineAsset(GraphicsSettings.currentRenderPipeline ?? QualitySettings.renderPipeline),
+                    lightsUseLinearIntensity = GraphicsSettings.lightsUseLinearIntensity,
+                    lightsUseColorTemperature = GraphicsSettings.lightsUseColorTemperature,
+                    transparencySortMode = GraphicsSettings.transparencySortMode.ToString(),
+                    transparencySortAxis = ToVector3Object(GraphicsSettings.transparencySortAxis)
+                }
+            };
+        }
+
+        public static object GetProjectPackages()
+        {
+            var projectRoot = Directory.GetCurrentDirectory();
+            var manifestPath = Path.Combine(projectRoot, "Packages", "manifest.json");
+            if (!File.Exists(manifestPath))
+            {
+                throw new FileNotFoundException($"Unity manifest was not found at '{manifestPath}'.");
+            }
+
+            var manifest = JObject.Parse(File.ReadAllText(manifestPath));
+            var dependencies = manifest["dependencies"] is JObject dependencyObject
+                ? dependencyObject.Properties().Select(property => new
+                {
+                    name = property.Name,
+                    version = property.Value.ToString()
+                }).OrderBy(entry => entry.name, StringComparer.OrdinalIgnoreCase).Cast<object>().ToList()
+                : new List<object>();
+
+            return new
+            {
+                manifestPath = manifestPath.Replace('\\', '/'),
+                scopedRegistries = manifest["scopedRegistries"] ?? new JArray(),
+                dependencies
             };
         }
 
@@ -531,6 +551,59 @@ namespace TA.ReadOnlyUnityMcp
             }
 
             return scenes;
+        }
+
+        private static List<Scene> GetFilteredScenes(string scenePath)
+        {
+            var scenes = GetLoadedScenes();
+            if (!string.IsNullOrWhiteSpace(scenePath))
+            {
+                scenes = scenes.Where(scene => string.Equals(scene.path, NormalizeAssetPath(scenePath), StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+
+            if (scenes.Count == 0)
+            {
+                throw new InvalidOperationException("No loaded scenes matched the requested scene path.");
+            }
+
+            return scenes;
+        }
+
+        private static List<string> ParseCsvValues(string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? new List<string>()
+                : value.Split(',')
+                    .Select(entry => entry.Trim())
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+        }
+
+        private static bool MatchesSceneObjectFilter(GameObject gameObject, IReadOnlyCollection<string> layerFilters, string tag)
+        {
+            if (gameObject == null)
+            {
+                return false;
+            }
+
+            if (layerFilters != null && layerFilters.Count > 0)
+            {
+                var layerName = LayerMask.LayerToName(gameObject.layer);
+                var layerIndex = gameObject.layer.ToString();
+                if (!layerFilters.Contains(layerName, StringComparer.OrdinalIgnoreCase)
+                    && !layerFilters.Contains(layerIndex, StringComparer.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(tag) && !string.Equals(gameObject.tag, tag.Trim(), StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static object DescribeSceneSummary(Scene scene)
@@ -648,36 +721,7 @@ namespace TA.ReadOnlyUnityMcp
                 && string.Equals(candidate.name, shaderName, StringComparison.Ordinal);
         }
 
-        private static object GetImportSettings(string assetPath)
-        {
-            var importer = AssetImporter.GetAtPath(assetPath);
-            if (importer == null)
-            {
-                return null;
-            }
-
-            if (importer is TextureImporter textureImporter)
-            {
-                return new
-                {
-                    importerType = importer.GetType().FullName,
-                    textureType = textureImporter.textureType.ToString(),
-                    alphaSource = textureImporter.alphaSource.ToString(),
-                    mipmapEnabled = textureImporter.mipmapEnabled,
-                    sRGBTexture = textureImporter.sRGBTexture,
-                    npotScale = textureImporter.npotScale.ToString(),
-                    wrapMode = textureImporter.wrapMode.ToString(),
-                    filterMode = textureImporter.filterMode.ToString(),
-                    anisoLevel = textureImporter.anisoLevel,
-                    maxTextureSize = textureImporter.maxTextureSize
-                };
-            }
-
-            return new
-            {
-                importerType = importer.GetType().FullName
-            };
-        }
+        private static object GetImportSettings(string assetPath) => MaterialExportSpecBuilder.GetImportSettings(assetPath);
 
         private static JArray BuildRawPropertyExports(IEnumerable<MaterialPropertyDto> properties)
         {
@@ -712,7 +756,8 @@ namespace TA.ReadOnlyUnityMcp
         private static JObject BuildShaderGraphBundle(string assetPath, bool recursive)
         {
             var guidMap = AssetDatabase.GetAllAssetPaths()
-                .Where(path => IsShaderGraphAssetPath(path) || IsSubGraphAssetPath(path))
+                .Where(path => path.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)
+                    || path.StartsWith("Packages/", StringComparison.OrdinalIgnoreCase))
                 .ToDictionary(path => AssetDatabase.AssetPathToGUID(path), NormalizeAssetPath, StringComparer.OrdinalIgnoreCase);
 
             var exportedGraphs = new Dictionary<string, GraphExportRecord>(StringComparer.OrdinalIgnoreCase);
@@ -769,6 +814,10 @@ namespace TA.ReadOnlyUnityMcp
             var propertyIds = properties.Select(property => property.Value<string>("m_ObjectId")).Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet();
             var keywordIds = keywords.Select(keyword => keyword.Value<string>("m_ObjectId")).Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet();
             var nodeIds = nodes.Select(node => node.Value<string>("m_ObjectId")).Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet();
+            var nodesById = nodes
+                .Where(node => !string.IsNullOrWhiteSpace(node.Value<string>("m_ObjectId")))
+                .GroupBy(node => node.Value<string>("m_ObjectId"), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
             var categoryMembership = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             var categoryExports = new JArray();
 
@@ -797,26 +846,53 @@ namespace TA.ReadOnlyUnityMcp
                 });
             }
 
-            var nodeExports = new JArray(nodes.Select(node => new JObject
+            var nodeExports = new JArray(nodes.Select(node =>
             {
-                ["objectId"] = node.Value<string>("m_ObjectId"),
-                ["type"] = node.Value<string>("m_Type"),
-                ["displayName"] = ToJToken(adapter.FirstString(node, "m_Name", "m_DisplayName")),
-                ["position"] = BuildPositionObject(node["m_DrawState"]?["m_Position"] as JObject),
-                ["groupId"] = ToJToken(node["m_Group"]?["m_Id"]?.Value<string>()),
-                ["categoryIds"] = categoryMembership.TryGetValue(node.Value<string>("m_ObjectId"), out var memberships) ? new JArray(memberships) : new JArray(),
-                ["subGraphGuid"] = ToJToken(adapter.ExtractSubGraphGuid(node["m_SerializedSubGraph"])),
-                ["subGraphPath"] = ToJToken(ResolveSubGraphPath(adapter.ExtractSubGraphGuid(node["m_SerializedSubGraph"]), guidMap)),
-                ["slots"] = node["m_Slots"] is JArray slots ? slots.Count : node["m_SerializableSlots"] is JArray legacySlots ? legacySlots.Count : 0
+                var export = new JObject
+                {
+                    ["objectId"] = node.Value<string>("m_ObjectId"),
+                    ["type"] = node.Value<string>("m_Type"),
+                    ["displayName"] = ToJToken(adapter.FirstString(node, "m_Name", "m_DisplayName")),
+                    ["position"] = BuildPositionObject(node["m_DrawState"]?["m_Position"] as JObject),
+                    ["groupId"] = ToJToken(node["m_Group"]?["m_Id"]?.Value<string>()),
+                    ["categoryIds"] = categoryMembership.TryGetValue(node.Value<string>("m_ObjectId"), out var memberships) ? new JArray(memberships) : new JArray(),
+                    ["subGraphGuid"] = ToJToken(adapter.ExtractSubGraphGuid(node["m_SerializedSubGraph"])),
+                    ["subGraphPath"] = ToJToken(ResolveSubGraphPath(adapter.ExtractSubGraphGuid(node["m_SerializedSubGraph"]), guidMap)),
+                    ["slots"] = adapter.ResolveNodeSlots(node, objectMap).Count,
+                    ["inputSlots"] = BuildNodeSlotExports(node, objectMap, adapter, "input"),
+                    ["outputSlots"] = BuildNodeSlotExports(node, objectMap, adapter, "output")
+                };
+
+                var customFunction = BuildCustomFunctionExport(node, guidMap);
+                if (customFunction != null)
+                {
+                    export["customFunction"] = customFunction;
+                }
+
+                return export;
             }));
 
-            var edgeExports = new JArray(edges.Select(edge => new JObject
+            var edgeExports = new JArray(edges.Select(edge =>
             {
-                ["objectId"] = ToJToken(edge.Value<string>("m_ObjectId")),
-                ["outputNodeId"] = ToJToken(edge["m_OutputSlot"]?["m_Node"]?["m_Id"]?.Value<string>() ?? edge["m_OutputSlot"]?.Value<string>("m_NodeGUIDSerialized")),
-                ["outputSlotId"] = ToJToken(edge["m_OutputSlot"]?.Value<int?>("m_SlotId")),
-                ["inputNodeId"] = ToJToken(edge["m_InputSlot"]?["m_Node"]?["m_Id"]?.Value<string>() ?? edge["m_InputSlot"]?.Value<string>("m_NodeGUIDSerialized")),
-                ["inputSlotId"] = ToJToken(edge["m_InputSlot"]?.Value<int?>("m_SlotId"))
+                var outputNodeId = edge["m_OutputSlot"]?["m_Node"]?["m_Id"]?.Value<string>()
+                                   ?? edge["m_OutputSlot"]?.Value<string>("m_NodeGUIDSerialized");
+                var inputNodeId = edge["m_InputSlot"]?["m_Node"]?["m_Id"]?.Value<string>()
+                                  ?? edge["m_InputSlot"]?.Value<string>("m_NodeGUIDSerialized");
+                var outputNode = ResolveNode(nodesById, outputNodeId);
+                var inputNode = ResolveNode(nodesById, inputNodeId);
+                var outputSlotId = edge["m_OutputSlot"]?.Value<int?>("m_SlotId");
+                var inputSlotId = edge["m_InputSlot"]?.Value<int?>("m_SlotId");
+
+                return new JObject
+                {
+                    ["objectId"] = ToJToken(edge.Value<string>("m_ObjectId")),
+                    ["outputNodeId"] = ToJToken(outputNodeId),
+                    ["outputSlotId"] = ToJToken(outputSlotId),
+                    ["outputSlotName"] = ToJToken(ResolveNodeSlotDisplayName(outputNode, outputSlotId, objectMap, adapter)),
+                    ["inputNodeId"] = ToJToken(inputNodeId),
+                    ["inputSlotId"] = ToJToken(inputSlotId),
+                    ["inputSlotName"] = ToJToken(ResolveNodeSlotDisplayName(inputNode, inputSlotId, objectMap, adapter))
+                };
             }));
 
             var groupExports = new JArray(groups.Select(group => new JObject
@@ -1358,6 +1434,342 @@ namespace TA.ReadOnlyUnityMcp
             return guidMap.TryGetValue(guid, out var assetPath) ? assetPath : null;
         }
 
+        private static JObject BuildCustomFunctionExport(JObject node, IReadOnlyDictionary<string, string> guidMap)
+        {
+            if (node == null)
+            {
+                return null;
+            }
+
+            var typeName = node.Value<string>("m_Type");
+            if (string.IsNullOrWhiteSpace(typeName)
+                || typeName.IndexOf("CustomFunctionNode", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                return null;
+            }
+
+            var sourceType = node.Value<int?>("m_SourceType");
+            var sourceGuid = node.Value<string>("m_FunctionSource");
+            return new JObject
+            {
+                ["sourceType"] = ToJToken(sourceType),
+                ["sourceTypeName"] = ToJToken(ResolveCustomFunctionSourceTypeName(sourceType)),
+                ["functionName"] = ToJToken(node.Value<string>("m_FunctionName")),
+                ["functionSourceGuid"] = ToJToken(sourceGuid),
+                ["functionSourcePath"] = ToJToken(ResolveSubGraphPath(sourceGuid, guidMap)),
+                ["functionBody"] = ToJToken(node.Value<string>("m_FunctionBody"))
+            };
+        }
+
+        private static string ResolveCustomFunctionSourceTypeName(int? sourceType)
+        {
+            switch (sourceType)
+            {
+                case 0:
+                    return "file";
+                case 1:
+                    return "string";
+                default:
+                    return sourceType.HasValue ? $"unknown_{sourceType.Value}" : null;
+            }
+        }
+
+        private static JObject BuildWorldDissolveRuntimeExport(Material material, string materialAssetPath)
+        {
+            var worldDissolveType = ResolveTypeByName("INab.WorldDissolve.WorldDissolve");
+            if (worldDissolveType == null)
+            {
+                return new JObject
+                {
+                    ["available"] = false,
+                    ["reason"] = "world_dissolve_type_not_loaded",
+                    ["instances"] = new JArray()
+                };
+            }
+
+            var instances = new JArray();
+            foreach (var obj in Resources.FindObjectsOfTypeAll(worldDissolveType))
+            {
+                if (!(obj is Component component) || !component.gameObject.scene.IsValid())
+                {
+                    continue;
+                }
+
+                if (!ComponentUsesMaterial(component, material, materialAssetPath))
+                {
+                    continue;
+                }
+
+                instances.Add(BuildWorldDissolveInstanceExport(component, materialAssetPath));
+            }
+
+            return new JObject
+            {
+                ["available"] = true,
+                ["instanceCount"] = instances.Count,
+                ["instances"] = instances
+            };
+        }
+
+        private static JObject BuildWorldDissolveInstanceExport(Component component, string materialAssetPath)
+        {
+            var componentType = component.GetType();
+            var baseType = componentType.BaseType;
+            var gameObject = component.gameObject;
+
+            return new JObject
+            {
+                ["componentType"] = componentType.FullName,
+                ["gameObjectName"] = gameObject.name,
+                ["scenePath"] = BuildGameObjectScenePath(gameObject.transform),
+                ["sceneName"] = gameObject.scene.name,
+                ["enabled"] = component is Behaviour behaviour ? behaviour.enabled : true,
+                ["activeInHierarchy"] = gameObject.activeInHierarchy,
+                ["shaderType"] = ToJToken(ReadFieldOrPropertyAsString(component, componentType, "propertiesType")),
+                ["globalPropertiesId"] = ToJToken(ReadFieldOrPropertyAsString(component, componentType, "globalPropertiesId")),
+                ["activeMasks"] = ToJToken(ReadFieldValue<int?>(component, baseType, "activeMasks")),
+                ["maskType"] = ToJToken(ReadFieldOrPropertyAsString(component, baseType, "type")),
+                ["useDisplacement"] = ToJToken(ReadFieldValue<bool?>(component, baseType, "useDisplacement")),
+                ["materialMatches"] = BuildReferencedMaterialsExport(component, baseType, materialAssetPath),
+                ["sdfVectors"] = new JObject
+                {
+                    ["positions"] = SerializeVector4Array(ReadFieldValue<Vector4[]>(component, componentType, "positions")),
+                    ["scales"] = SerializeVector4Array(ReadFieldValue<Vector4[]>(component, componentType, "scales")),
+                    ["ups"] = SerializeVector4Array(ReadFieldValue<Vector4[]>(component, componentType, "upVectors")),
+                    ["rights"] = SerializeVector4Array(ReadFieldValue<Vector4[]>(component, componentType, "rightVectors")),
+                    ["forwards"] = SerializeVector4Array(ReadFieldValue<Vector4[]>(component, componentType, "forwardVectors")),
+                    ["positions2"] = SerializeVector4Array(ReadFieldValue<Vector4[]>(component, componentType, "positions_2"))
+                },
+                ["masks"] = BuildMasksExport(ReadFieldValue<System.Collections.IEnumerable>(component, componentType, "masksList"))
+            };
+        }
+
+        private static JArray BuildReferencedMaterialsExport(Component component, Type baseType, string materialAssetPath)
+        {
+            var materials = ReadFieldValue<System.Collections.IEnumerable>(component, baseType, "materialsList");
+            var exports = new JArray();
+            if (materials == null)
+            {
+                return exports;
+            }
+
+            foreach (var entry in materials)
+            {
+                if (!(entry is Material material))
+                {
+                    continue;
+                }
+
+                var assetPath = AssetDatabase.GetAssetPath(material);
+                exports.Add(new JObject
+                {
+                    ["name"] = material.name,
+                    ["path"] = assetPath,
+                    ["matchesExportedMaterial"] = string.Equals(assetPath, materialAssetPath, StringComparison.OrdinalIgnoreCase)
+                });
+            }
+
+            return exports;
+        }
+
+        private static JArray BuildMasksExport(System.Collections.IEnumerable masks)
+        {
+            var exports = new JArray();
+            if (masks == null)
+            {
+                return exports;
+            }
+
+            foreach (var entry in masks)
+            {
+                if (!(entry is Component maskComponent))
+                {
+                    continue;
+                }
+
+                var transform = maskComponent.transform;
+                exports.Add(new JObject
+                {
+                    ["componentType"] = maskComponent.GetType().FullName,
+                    ["name"] = maskComponent.gameObject.name,
+                    ["scenePath"] = BuildGameObjectScenePath(transform),
+                    ["position"] = SerializeVector3(transform.position),
+                    ["rotationEuler"] = SerializeVector3(transform.rotation.eulerAngles),
+                    ["lossyScale"] = SerializeVector3(transform.lossyScale),
+                    ["type"] = ToJToken(ReadFieldOrPropertyAsString(maskComponent, maskComponent.GetType(), "type")),
+                    ["colliderScale"] = ToJToken(ReadFieldValue<float?>(maskComponent, maskComponent.GetType(), "colliderScale")),
+                    ["angle"] = ToJToken(ReadFieldValue<float?>(maskComponent, maskComponent.GetType(), "angle")),
+                    ["angleAdjust"] = ToJToken(ReadFieldValue<float?>(maskComponent, maskComponent.GetType(), "angleAdjust")),
+                    ["radiusAdjust"] = ToJToken(ReadFieldValue<float?>(maskComponent, maskComponent.GetType(), "radiusAdjust"))
+                });
+            }
+
+            return exports;
+        }
+
+        private static bool ComponentUsesMaterial(Component component, Material targetMaterial, string targetMaterialAssetPath)
+        {
+            if (component == null || targetMaterial == null)
+            {
+                return false;
+            }
+
+            var materials = ReadFieldValue<System.Collections.IEnumerable>(component, component.GetType().BaseType, "materialsList");
+            if (materials == null)
+            {
+                return false;
+            }
+
+            foreach (var entry in materials)
+            {
+                if (!(entry is Material material))
+                {
+                    continue;
+                }
+
+                if (material == targetMaterial)
+                {
+                    return true;
+                }
+
+                var materialAssetPath = AssetDatabase.GetAssetPath(material);
+                if (!string.IsNullOrWhiteSpace(materialAssetPath)
+                    && string.Equals(materialAssetPath, targetMaterialAssetPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static Type ResolveTypeByName(string fullName)
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                var type = assembly.GetType(fullName, false);
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+
+            return null;
+        }
+
+        private static T ReadFieldValue<T>(object source, Type declaredType, string memberName)
+        {
+            if (source == null || declaredType == null || string.IsNullOrWhiteSpace(memberName))
+            {
+                return default(T);
+            }
+
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            for (var current = declaredType; current != null; current = current.BaseType)
+            {
+                var field = current.GetField(memberName, Flags);
+                if (field == null)
+                {
+                    continue;
+                }
+
+                var value = field.GetValue(source);
+                if (value is T typed)
+                {
+                    return typed;
+                }
+
+                if (value == null)
+                {
+                    return default(T);
+                }
+
+                try
+                {
+                    return (T)value;
+                }
+                catch
+                {
+                    return default(T);
+                }
+            }
+
+            return default(T);
+        }
+
+        private static string ReadFieldOrPropertyAsString(object source, Type declaredType, string memberName)
+        {
+            if (source == null || declaredType == null || string.IsNullOrWhiteSpace(memberName))
+            {
+                return null;
+            }
+
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            for (var current = declaredType; current != null; current = current.BaseType)
+            {
+                var field = current.GetField(memberName, Flags);
+                if (field != null)
+                {
+                    return field.GetValue(source)?.ToString();
+                }
+
+                var property = current.GetProperty(memberName, Flags);
+                if (property != null && property.CanRead)
+                {
+                    try
+                    {
+                        return property.GetValue(source, null)?.ToString();
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static string BuildGameObjectScenePath(Transform transform)
+        {
+            if (transform == null)
+            {
+                return null;
+            }
+
+            var segments = new List<string>();
+            for (var current = transform; current != null; current = current.parent)
+            {
+                segments.Add(current.name);
+            }
+
+            segments.Reverse();
+            return string.Join("/", segments);
+        }
+
+        private static JArray SerializeVector4Array(Vector4[] values)
+        {
+            return values == null
+                ? new JArray()
+                : new JArray(values.Select(value => new JObject
+                {
+                    ["x"] = value.x,
+                    ["y"] = value.y,
+                    ["z"] = value.z,
+                    ["w"] = value.w
+                }));
+        }
+
+        private static JObject SerializeVector3(Vector3 value)
+        {
+            return new JObject
+            {
+                ["x"] = value.x,
+                ["y"] = value.y,
+                ["z"] = value.z
+            };
+        }
+
         private static bool IsShaderGraphAssetPath(string assetPath)
         {
             return string.Equals(Path.GetExtension(assetPath), ".shadergraph", StringComparison.OrdinalIgnoreCase);
@@ -1382,6 +1794,45 @@ namespace TA.ReadOnlyUnityMcp
                 ["width"] = ToJToken(position.Value<float?>("width")),
                 ["height"] = ToJToken(position.Value<float?>("height"))
             };
+        }
+
+        private static JArray BuildNodeSlotExports(JObject node, IReadOnlyDictionary<string, JObject> objectMap, GraphSchemaAdapter adapter, string directionFilter)
+        {
+            return new JArray(adapter.ResolveNodeSlots(node, objectMap)
+                .Select(slot => BuildSlotExport(slot, adapter))
+                .Where(slot => string.Equals(slot.Value<string>("direction"), directionFilter, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        private static JObject BuildSlotExport(JObject slot, GraphSchemaAdapter adapter)
+        {
+            return new JObject
+            {
+                ["objectId"] = ToJToken(slot.Value<string>("m_ObjectId")),
+                ["slotId"] = ToJToken(slot.Value<int?>("m_Id")),
+                ["displayName"] = ToJToken(adapter.FirstString(slot, "m_DisplayName", "m_Name", "m_ShaderOutputName")),
+                ["direction"] = ToJToken(adapter.ResolveSlotDirection(slot)),
+                ["valueType"] = ToJToken(slot.Value<string>("m_Type")),
+                ["slotType"] = ToJToken(slot.Value<int?>("m_SlotType")),
+                ["shaderOutputName"] = ToJToken(slot.Value<string>("m_ShaderOutputName")),
+                ["stageCapability"] = ToJToken(slot.Value<int?>("m_StageCapability")),
+                ["hidden"] = ToJToken(slot.Value<bool?>("m_Hidden"))
+            };
+        }
+
+        private static JObject ResolveNode(IReadOnlyDictionary<string, JObject> nodesById, string nodeId)
+        {
+            if (string.IsNullOrWhiteSpace(nodeId))
+            {
+                return null;
+            }
+
+            return nodesById != null && nodesById.TryGetValue(nodeId, out var node) ? node : null;
+        }
+
+        private static string ResolveNodeSlotDisplayName(JObject node, int? slotId, IReadOnlyDictionary<string, JObject> objectMap, GraphSchemaAdapter adapter)
+        {
+            var slot = adapter.FindNodeSlotById(node, slotId, objectMap);
+            return adapter.FirstString(slot, "m_DisplayName", "m_Name", "m_ShaderOutputName");
         }
 
         private static JObject SimplifyGraphObjectReference(JObject source, ISet<string> propertyIds, ISet<string> keywordIds, ISet<string> nodeIds, GraphSchemaAdapter adapter)
@@ -1513,10 +1964,21 @@ namespace TA.ReadOnlyUnityMcp
             {
                 name = light.name,
                 gameObjectPath = GetTransformPath(light.transform),
+                layer = LayerMask.LayerToName(light.gameObject.layer),
+                tag = light.gameObject.tag,
                 type = light.type.ToString(),
                 intensity = light.intensity,
+                intensityUnit = ReadOptionalMember(light, "lightUnit")?.ToString(),
                 range = light.range,
+                spotAngle = light.spotAngle,
+                innerSpotAngle = ReadOptionalMember(light, "innerSpotAngle"),
                 color = ToColorObject(light.color),
+                colorTemperature = light.colorTemperature,
+                useColorTemperature = light.useColorTemperature,
+                bounceIntensity = light.bounceIntensity,
+                shadowStrength = light.shadowStrength,
+                cookieSize = light.cookieSize,
+                cullingMask = light.cullingMask,
                 shadows = light.shadows.ToString()
             };
         }
@@ -1527,9 +1989,17 @@ namespace TA.ReadOnlyUnityMcp
             {
                 name = probe.name,
                 gameObjectPath = GetTransformPath(probe.transform),
+                layer = LayerMask.LayerToName(probe.gameObject.layer),
+                tag = probe.gameObject.tag,
                 mode = probe.mode.ToString(),
                 importance = probe.importance,
                 boxProjection = probe.boxProjection,
+                size = ToVector3Object(probe.size),
+                center = ToVector3Object(probe.center),
+                nearClipPlane = probe.nearClipPlane,
+                farClipPlane = probe.farClipPlane,
+                resolution = probe.resolution,
+                intensity = probe.intensity,
                 bounds = new
                 {
                     center = ToVector3Object(probe.center),
@@ -1551,9 +2021,13 @@ namespace TA.ReadOnlyUnityMcp
             {
                 name = volume.name,
                 gameObjectPath = GetTransformPath(volume.transform),
+                layer = LayerMask.LayerToName(volume.gameObject.layer),
+                tag = volume.gameObject.tag,
                 type = type.FullName,
+                enabled = volume is Behaviour behaviour ? behaviour.enabled : true,
                 isGlobal = ReadOptionalMember(volume, "isGlobal"),
                 priority = ReadOptionalMember(volume, "priority"),
+                weight = ReadOptionalMember(volume, "weight"),
                 blendDistance = ReadOptionalMember(volume, "blendDistance"),
                 sharedProfile = DescribeUnityObject(ReadOptionalMember(volume, "sharedProfile") as UnityEngine.Object)
             };
@@ -1573,6 +2047,68 @@ namespace TA.ReadOnlyUnityMcp
                 path = path,
                 guid = string.IsNullOrWhiteSpace(path) ? null : AssetDatabase.AssetPathToGUID(path),
                 type = value.GetType().FullName
+            };
+        }
+
+        private static object DescribeRenderPipelineAsset(RenderPipelineAsset pipelineAsset)
+        {
+            if (pipelineAsset == null)
+            {
+                return null;
+            }
+
+            var path = AssetDatabase.GetAssetPath(pipelineAsset);
+            return new
+            {
+                name = pipelineAsset.name,
+                path,
+                guid = string.IsNullOrWhiteSpace(path) ? null : AssetDatabase.AssetPathToGUID(path),
+                type = pipelineAsset.GetType().FullName
+            };
+        }
+
+        private static RenderPipelineAsset ReadQualityRenderPipeline(int qualityLevel)
+        {
+            var method = typeof(QualitySettings).GetMethod("GetRenderPipelineAssetAt", BindingFlags.Static | BindingFlags.Public);
+            if (method == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return method.Invoke(null, new object[] { qualityLevel }) as RenderPipelineAsset;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static object DescribePrefabNode(Transform transform, string rootPath)
+        {
+            var renderer = transform.GetComponent<Renderer>();
+            return new
+            {
+                name = transform.name,
+                path = rootPath,
+                localPosition = ToVector3Object(transform.localPosition),
+                localRotationEuler = ToVector3Object(transform.localEulerAngles),
+                localScale = ToVector3Object(transform.localScale),
+                components = transform.GetComponents<Component>()
+                    .Where(component => component != null)
+                    .Select(component => new
+                    {
+                        type = component.GetType().FullName,
+                        name = component.GetType().Name
+                    })
+                    .ToList(),
+                materials = renderer != null
+                    ? renderer.sharedMaterials.Where(material => material != null).Select(DescribeMaterialReference).ToList()
+                    : new List<MaterialReferenceDto>(),
+                children = transform.Cast<Transform>()
+                    .Select(child => DescribePrefabNode(child, $"{rootPath}/{child.name}"))
+                    .ToList()
             };
         }
 
@@ -1684,6 +2220,29 @@ namespace TA.ReadOnlyUnityMcp
 
             var field = type.GetField(memberName);
             return field?.GetValue(instance);
+        }
+
+        private static string ReadStaticPropertyValue(Type type, string memberName)
+        {
+            if (type == null || string.IsNullOrWhiteSpace(memberName))
+            {
+                return null;
+            }
+
+            var property = type.GetProperty(memberName, BindingFlags.Static | BindingFlags.Public);
+            if (property == null || !property.CanRead)
+            {
+                return null;
+            }
+
+            try
+            {
+                return property.GetValue(null, null)?.ToString();
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static float? ToNullableFloat(object value)

@@ -15,6 +15,12 @@ It is split into two pieces:
 - Shader properties, keywords, fallback, custom editor, and usage lookup
 - Shader Graph structure inspection
 - Loaded scene info and renderer-material bindings
+- Render pipeline and active quality-level bindings
+- Detailed scene light and volume inspection with filters
+- Prefab hierarchy/component/material inspection
+- Texture importer and platform override inspection
+- AnimatorController / AnimationClip structure inspection
+- Project settings and package manifest inspection
 
 ## What it does not do
 
@@ -87,16 +93,28 @@ If you need a different port, set `UNITY_READONLY_MCP_PORT` or `UNITY_MCP_PORT` 
 - `get_shadergraph_info`
 - `get_scene_info`
 - `get_scene_renderers`
+- `get_pipeline_info`
+- `get_scene_lights`
+- `get_scene_volumes`
+- `get_prefab_info`
+- `get_texture_info`
+- `get_animation_info`
+- `get_project_settings`
+- `get_project_packages`
 
 ## Notes
 
 - `get_scene_info` and `get_scene_renderers` only inspect currently loaded scenes in the Editor.
+- `get_scene_lights` and `get_scene_volumes` support optional `scenePath`, `layers`, and `tag` filters.
 - Shader Graph parsing is intentionally read-only and structure-focused.
 - Shader usage lookups are exact by shader asset when a shader path or GUID is available. Name-only lookups remain best-effort and can still be ambiguous if a project contains multiple shaders with the same `Shader.name`.
 - `get_material_export_spec` returns a transfer-oriented JSON spec, suggested export filenames, and optional recursive Shader Graph bundle data, but it does not write files or copy textures.
 - `get_material_export_spec` only maps base-map alpha to `opacity` when the material is transparent or alpha-clipped; opaque materials no longer claim opacity from base-map alpha by default.
 - `scripts/export-material-package.js` is the write-side bridge that consumes `get_material_export_spec` and writes `manifest.json`, optional Shader Graph bundle files, and copied textures into an output directory.
 - Shader Graph output is best-effort across Unity package versions; malformed or drifting graph files return stable JSON with `warnings` and, when needed, `parseError` instead of failing the whole route.
+- `/health` now includes timeout and compatibility metadata for quick diagnostics.
+- `UNITY_MCP_TIMEOUT_MS` configures the JS-side timeout and is mirrored by the Unity-side main-thread timeout with a small safety buffer.
+- `UNITY_MCP_LOG_REQUESTS=1` enables Unity-side request/response timing logs for diagnostics.
 - The Unity HTTP bridge is intended for local tooling, not browser clients. It does not enable cross-origin browser access, and `/health` avoids returning the project absolute path.
 
 ## Maintenance docs
