@@ -7,7 +7,7 @@ import {
 import { UnityBridgeClient } from "./lib/unity-bridge-client.js";
 import { callUnityTool, tools } from "./tools/index.js";
 
-const DEFAULT_PORT = process.env.UNITY_MCP_PORT || process.env.UNITY_READONLY_MCP_PORT || "51234";
+const DEFAULT_PORT = process.env.UNITY_MCP_PORT || "51234";
 const DEFAULT_BASE_URL = process.env.UNITY_MCP_BASE_URL || `http://127.0.0.1:${DEFAULT_PORT}`;
 const DEFAULT_TIMEOUT_MS = Number.parseInt(process.env.UNITY_MCP_TIMEOUT_MS || "15000", 10);
 
@@ -15,7 +15,7 @@ const client = new UnityBridgeClient(DEFAULT_BASE_URL, DEFAULT_TIMEOUT_MS);
 
 const server = new Server(
   {
-    name: "readonly-unity-mcp",
+    name: "unity-mcp",
     version: "0.1.0",
   },
   {
@@ -47,7 +47,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 server.onerror = (error) => {
-  process.stderr.write(`[readonly-unity-mcp] ${error instanceof Error ? error.stack || error.message : String(error)}\n`);
+  process.stderr.write(`[unity-mcp] ${error instanceof Error ? error.stack || error.message : String(error)}\n`);
 };
 
 async function main() {
@@ -56,6 +56,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`[readonly-unity-mcp] Failed to start: ${error instanceof Error ? error.stack || error.message : String(error)}\n`);
+  process.stderr.write(`[unity-mcp] Failed to start: ${error instanceof Error ? error.stack || error.message : String(error)}\n`);
   process.exit(1);
 });

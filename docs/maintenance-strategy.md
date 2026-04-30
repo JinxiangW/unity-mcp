@@ -2,9 +2,9 @@
 
 ## Repo maintenance priorities
 
-### 1. Protect the read-only boundary
+### 1. Protect the write boundary
 
-Any change that can mutate the Unity project should be rejected unless the repo goal changes explicitly.
+Any mutation outside explicit material migration artifacts under `Assets/` should be rejected unless the repo goal changes explicitly.
 
 ### 2. Keep contracts stable
 
@@ -43,8 +43,9 @@ Examples:
 
 ### Step B. Decide the layer
 
-- If it is pure Unity data retrieval, add it in `UnityReadOnlyMcpQueries.cs`
-- If it needs a new route, wire it in `UnityReadOnlyMcpServer.cs`
+- If it is pure Unity data retrieval, add it in `UnityMcpQueries.cs`
+- If it writes material migration artifacts, keep the write scope explicit and verifiable
+- If it needs a new route, wire it in `UnityMcpServer.cs`
 - If it needs a user-facing tool, expose it in `src/index.js`
 
 ### Step C. Keep the output shaped for analysis
@@ -85,6 +86,7 @@ When Unity returns awkward or mixed results, use this rule:
 - Scene-level material usage summaries
 - Import-settings readers for common rendering assets
 - Dependency-chain helpers for render assets
+- UE-side consumers for generated material transfer packages
 
 ## Avoid these until later
 

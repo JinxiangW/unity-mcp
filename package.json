@@ -1,7 +1,7 @@
 {
-  "name": "readonly-unity-mcp",
+  "name": "unity-mcp",
   "version": "0.1.0",
-  "description": "Read-only MCP bridge for Unity 6.3 rendering and material analysis workflows.",
+  "description": "MCP bridge for Unity 6.3 rendering, material analysis, and scoped transfer artifact workflows.",
   "type": "module",
   "main": "src/index.js",
   "scripts": {

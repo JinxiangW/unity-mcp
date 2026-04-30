@@ -1,6 +1,6 @@
-# Unity Read-only MCP Playbook
+# Unity MCP Playbook
 
-This repo is a focused, read-only Unity MCP for material and rendering TA workflows.
+This repo is a focused, Unity MCP for material and rendering TA workflows.
 
 ## First read in a new session
 
@@ -12,26 +12,27 @@ This repo is a focused, read-only Unity MCP for material and rendering TA workfl
 ## Project shape
 
 - `src/index.js`: stdio MCP server, tool definitions, HTTP forwarding, response normalization
-- `unity-package/com.ta.readonly-unity-mcp/Editor/UnityReadOnlyMcpServer.cs`: Unity local HTTP host
-- `unity-package/com.ta.readonly-unity-mcp/Editor/UnityReadOnlyMcpQueries.cs`: query layer over Unity Editor APIs
-- `unity-package/com.ta.readonly-unity-mcp/Editor/UnityShaderGraphTextParser.cs`: Shader Graph structure parser
+- `unity-package/com.ta.unity-mcp/Editor/UnityMcpServer.cs`: Unity local HTTP host
+- `unity-package/com.ta.unity-mcp/Editor/UnityMcpQueries.cs`: query layer over Unity Editor APIs
+- `unity-package/com.ta.unity-mcp/Editor/MaterialTransferPackageWriter.cs`: scoped material migration artifact writer
+- `unity-package/com.ta.unity-mcp/Editor/UnityShaderGraphTextParser.cs`: Shader Graph structure parser
 - `docs/`: architecture, maintenance, extension guidance
 
 ## Non-negotiable constraints
 
-- Read-only only
+- V1 write scope is limited to material migration artifacts under `Assets/`
 - No build control
 - No playmode control
 - No arbitrary C# execution
-- No `set`, `modify`, `execute`, or hidden write side effects
+- No broad `set`, `modify`, `execute`, or hidden write side effects
 - Return structured JSON only
 
 ## Design rule
 
 Every feature should fit this path:
 
-1. Unity query logic in `UnityReadOnlyMcpQueries.cs`
-2. Unity HTTP route in `UnityReadOnlyMcpServer.cs`
+1. Unity query logic in `UnityMcpQueries.cs`
+2. Unity HTTP route in `UnityMcpServer.cs`
 3. MCP tool contract in `src/index.js`
 4. Docs update in `README.md` or `docs/`
 
@@ -57,4 +58,4 @@ When Unity is open, verify in this order:
 - `/health` responds
 - New endpoint returns JSON and fails safely
 - README/docs mention the new capability
-- Existing read-only constraints still hold
+- Write-scope constraints still hold

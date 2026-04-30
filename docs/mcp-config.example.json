@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "readonly-unity": {
+    "unity": {
       "command": "node",
       "args": [
         "D:/unity-mcp/src/index.js"

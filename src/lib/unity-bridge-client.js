@@ -20,13 +20,28 @@ export class UnityBridgeClient {
       url.searchParams.set(key, String(value));
     }
 
+    return this.#request(url, { method: "GET", headers: { Accept: "application/json" } });
+  }
+
+  async post(path, body = {}) {
+    const url = new URL(`${this.baseUrl}${path}`);
+    return this.#request(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async #request(url, init) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
       const response = await fetch(url, {
-        method: "GET",
-        headers: { Accept: "application/json" },
+        ...init,
         signal: controller.signal,
       });
 

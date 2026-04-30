@@ -18,14 +18,14 @@ In practice, this means future Unity-version work should mostly replace or exten
 Use a stable protocol with swappable implementations.
 
 - `src/index.js` should stay mostly version-agnostic
-- `UnityReadOnlyMcpServer.cs` should stay mostly version-agnostic
-- `UnityReadOnlyMcpQueries.cs` should express business questions, not version branches
+- `UnityMcpServer.cs` should stay mostly version-agnostic
+- `UnityMcpQueries.cs` should express business questions, not version branches
 - version differences should be absorbed by a dedicated `Compat` layer
 
 ## Proposed Unity package structure
 
 ```text
-unity-package/com.ta.readonly-unity-mcp/Editor/
+unity-package/com.ta.unity-mcp/Editor/
   Contracts/
     AssetRefDto.cs
     AssetInfoDto.cs
@@ -62,9 +62,10 @@ unity-package/com.ta.readonly-unity-mcp/Editor/
       GraphSchemaAdapter.cs
       GraphNormalizer.cs
 
-  UnityReadOnlyMcpBootstrap.cs
-  UnityReadOnlyMcpServer.cs
-  UnityReadOnlyMcpQueries.cs
+  UnityMcpBootstrap.cs
+  UnityMcpServer.cs
+  UnityMcpQueries.cs
+  MaterialTransferPackageWriter.cs
   UnityShaderGraphTextParser.cs
 ```
 
@@ -140,7 +141,7 @@ internal static class CompatServices
 }
 ```
 
-`UnityReadOnlyMcpQueries.cs` should depend on this facade instead of directly branching on Unity version.
+`UnityMcpQueries.cs` should depend on this facade instead of directly branching on Unity version.
 
 ## Interface design
 
@@ -230,7 +231,7 @@ This seam is lower risk than shader and shader graph, but isolating it keeps que
 
 ## Query-layer target state
 
-`UnityReadOnlyMcpQueries.cs` should become a thin orchestration layer.
+`UnityMcpQueries.cs` should become a thin orchestration layer.
 
 Instead of this style:
 
@@ -366,7 +367,7 @@ Validated against:
 What passed:
 
 - package resolved as an embedded package
-- `TA.ReadOnlyUnityMcp.Editor.dll` compiled cleanly
+- `TA.UnityMcp.Editor.dll` compiled cleanly
 - `/health`
 - `/api/scenes/info`
 - `/api/scenes/renderers`

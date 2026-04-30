@@ -1,4 +1,4 @@
-# Unity Read-Only MCP 修改清单
+# Unity MCP 修改清单
 
 基于代码审阅结论，按优先级排列。
 
@@ -6,11 +6,11 @@
 
 ## P0 - 质量与可维护性
 
-- [ ] **拆分 `UnityReadOnlyMcpQueries.cs`**
+- [ ] **拆分 `UnityMcpQueries.cs`**
   - 已抽出 `MaterialExportSpecBuilder.cs`
   - 已抽出 `ShaderGraphBundleBuilder.cs`
   - 查询入口已开始改为委托 builder
-  - 仍需继续清理 `UnityReadOnlyMcpQueries.cs` 中残留 helper，进一步收敛到“简单查询 + 分发”
+  - 仍需继续清理 `UnityMcpQueries.cs` 中残留 helper，进一步收敛到“简单查询 + 分发”
 
 - [ ] **补自动化测试**
   - 已新增 Node 侧自动化测试，覆盖工具注册、调用分发、结果归一化

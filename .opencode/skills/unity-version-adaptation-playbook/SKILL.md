@@ -1,6 +1,6 @@
 ---
 name: unity-version-adaptation-playbook
-description: Adapt this read-only Unity MCP to a new Unity version while keeping MCP tools, routes, and JSON contracts as stable as possible.
+description: Adapt this Unity MCP to a new Unity version while keeping MCP tools, routes, and JSON contracts as stable as possible.
 license: MIT
 compatibility: opencode
 metadata:
@@ -26,15 +26,15 @@ The goal is not just to "make it compile". The goal is to make it compile with t
 2. `docs/multi-version-compatibility.md`
 3. `docs/architecture.md`
 4. `docs/maintenance-strategy.md`
-5. `.opencode/skills/unity-readonly-mcp-playbook/SKILL.md`
+5. `.opencode/skills/unity-mcp-playbook/SKILL.md`
 
 ## Core rule
 
 Prefer fixing new-version issues in this order:
 
-1. `unity-package/com.ta.readonly-unity-mcp/Editor/Compat/`
-2. `unity-package/com.ta.readonly-unity-mcp/Editor/UnityReadOnlyMcpQueries.cs`
-3. `unity-package/com.ta.readonly-unity-mcp/Editor/UnityReadOnlyMcpServer.cs`
+1. `unity-package/com.ta.unity-mcp/Editor/Compat/`
+2. `unity-package/com.ta.unity-mcp/Editor/UnityMcpQueries.cs`
+3. `unity-package/com.ta.unity-mcp/Editor/UnityMcpServer.cs`
 4. `src/index.js`
 
 If a problem can be solved in `Compat/`, do not change the MCP contract.

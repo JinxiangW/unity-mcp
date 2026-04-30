@@ -1,0 +1,13 @@
+{
+  "name": "com.ta.unity-mcp",
+  "version": "0.1.0",
+  "displayName": "TA Unity MCP",
+  "description": "Unity Editor HTTP bridge for material, shader, scene, Shader Graph inspection, and scoped transfer artifact writing.",
+  "unity": "2019.4",
+  "author": {
+    "name": "OpenCode"
+  },
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  }
+}
