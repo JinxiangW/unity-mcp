@@ -23,6 +23,8 @@ namespace TA.UnityMcp.Compat.Shader
         public static readonly MethodInfo ShaderUtilGetPropertyTypeMethod = typeof(ShaderUtil).GetMethod("GetPropertyType", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(UnityEngine.Shader), typeof(int) }, null);
         public static readonly MethodInfo ShaderUtilGetPropertyDescriptionMethod = typeof(ShaderUtil).GetMethod("GetPropertyDescription", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(UnityEngine.Shader), typeof(int) }, null);
         public static readonly MethodInfo ShaderUtilGetRangeLimitsMethod = typeof(ShaderUtil).GetMethod("GetRangeLimits", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(UnityEngine.Shader), typeof(int), typeof(int) }, null);
+        public static readonly MethodInfo ShaderUtilGetPropertyFlagsMethod = typeof(ShaderUtil).GetMethod("GetShaderPropertyFlags", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(UnityEngine.Shader), typeof(string) }, null);
+        public static readonly MethodInfo ShaderUtilGetPropertyAttributesMethod = typeof(ShaderUtil).GetMethod("GetShaderPropertyAttributes", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null, new[] { typeof(UnityEngine.Shader), typeof(string) }, null);
 
         private static readonly PropertyInfo PassCountProperty = typeof(UnityEngine.Shader).GetProperty("passCount", BindingFlags.Instance | BindingFlags.Public);
         private static readonly PropertyInfo KeywordSpaceProperty = typeof(UnityEngine.Shader).GetProperty("keywordSpace", BindingFlags.Instance | BindingFlags.Public);
@@ -123,6 +125,16 @@ namespace TA.UnityMcp.Compat.Shader
         public static string GetLegacyPropertyDescription(UnityEngine.Shader shader, int propertyIndex)
         {
             return ShaderUtilGetPropertyDescriptionMethod?.Invoke(null, new object[] { shader, propertyIndex }) as string;
+        }
+
+        public static object GetLegacyPropertyFlags(UnityEngine.Shader shader, string propertyName)
+        {
+            return ShaderUtilGetPropertyFlagsMethod?.Invoke(null, new object[] { shader, propertyName });
+        }
+
+        public static object GetLegacyPropertyAttributes(UnityEngine.Shader shader, string propertyName)
+        {
+            return ShaderUtilGetPropertyAttributesMethod?.Invoke(null, new object[] { shader, propertyName });
         }
 
         public static (float? rangeMin, float? rangeMax) GetLegacyRangeLimits(UnityEngine.Shader shader, int propertyIndex)

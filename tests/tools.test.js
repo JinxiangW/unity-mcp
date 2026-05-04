@@ -16,9 +16,18 @@ function makeClient() {
   };
 }
 
-test("tool registry includes new additive endpoints", () => {
+test("tool registry includes all read-only query endpoints", () => {
   const names = tools.map((tool) => tool.name);
   for (const requiredName of [
+    "get_asset_info",
+    "get_asset_dependencies",
+    "find_assets",
+    "get_material_info",
+    "get_shader_info",
+    "find_materials_using_shader",
+    "get_shadergraph_info",
+    "get_scene_info",
+    "get_scene_renderers",
     "get_pipeline_info",
     "get_scene_lights",
     "get_scene_volumes",
@@ -27,10 +36,11 @@ test("tool registry includes new additive endpoints", () => {
     "get_animation_info",
     "get_project_settings",
     "get_project_packages",
-    "create_material_transfer_package",
   ]) {
     assert.ok(names.includes(requiredName), `${requiredName} missing`);
   }
+
+  assert.equal(names.length, 17, "MCP should expose exactly 17 read-only tools");
 });
 
 test("callUnityTool dispatches to prefab route", async () => {
@@ -60,62 +70,6 @@ test("callUnityTool forwards scene filters as query params", async () => {
       scenePath: "Assets/Scenes/Sample.unity",
       layers: ["Default", "UI"],
       tag: "Gameplay",
-    },
-  });
-});
-
-test("callUnityTool posts material transfer package requests", async () => {
-  const client = makeClient();
-  const result = await callUnityTool("create_material_transfer_package", client, {
-    path: "Assets/Test.mat",
-    outputFolder: "Assets/MCPExports",
-    dryRun: true,
-  });
-
-  assert.equal(result.method, "POST");
-  assert.equal(result.path, "/api/materials/transfer-package");
-  assert.deepEqual(client.calls[0], {
-    method: "POST",
-    path: "/api/materials/transfer-package",
-    args: {
-      path: "Assets/Test.mat",
-      outputFolder: "Assets/MCPExports",
-      dryRun: true,
-    },
-  });
-});
-
-test("create_material_transfer_package validates material locator and output folder", async () => {
-  const client = makeClient();
-  await assert.rejects(
-    () => callUnityTool("create_material_transfer_package", client, { outputFolder: "Assets/MCPExports" }),
-    /Either 'path' or 'guid' is required/,
-  );
-
-  await assert.rejects(
-    () => callUnityTool("create_material_transfer_package", client, {
-      path: "Assets/Test.mat",
-      outputFolder: "Packages/Exports",
-    }),
-    /outputFolder/,
-  );
-});
-
-test("create_material_transfer_package forwards overwrite flag", async () => {
-  const client = makeClient();
-  await callUnityTool("create_material_transfer_package", client, {
-    guid: "abc123",
-    outputFolder: "Assets/MCPExports",
-    overwrite: true,
-  });
-
-  assert.deepEqual(client.calls[0], {
-    method: "POST",
-    path: "/api/materials/transfer-package",
-    args: {
-      guid: "abc123",
-      outputFolder: "Assets/MCPExports",
-      overwrite: true,
     },
   });
 });

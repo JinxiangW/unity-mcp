@@ -352,8 +352,40 @@ Unity 2022 LTS partial         shadergraph and shader APIs need extra validation
 
 ```text
 Unity 6000.3.7f1   supported   primary dev target, full smoke test passed
+Unity 2021.3.34f1 supported   URP 12.x smoke test passed, legacy ShaderUtil path for shader introspection
 Unity 2019.4.41f2 partial     URP 7.7.1 smoke test passed, legacy Shader Graph uses best-effort parsing
 ```
+
+### Unity 2021.3.34f1 notes
+
+Validated against:
+
+- Unity `2021.3.34f1`
+- URP `12.1.x`
+- Shader Graph `12.1.x`
+
+What passes:
+
+- package compiles cleanly as an embedded package
+- `/health`
+- `/api/scenes/info`
+- `/api/scenes/renderers`
+- `/api/materials/info` (legacy ShaderUtil introspection path)
+- `/api/shaders/info`
+- `/api/shadergraphs/info` (legacy schema normalization)
+- `/api/textures/info`
+- `/api/project/settings`
+
+What needed adaptation:
+
+- shader property flags and attributes use `ShaderUtil.GetShaderPropertyFlags` / `GetShaderPropertyAttributes` reflection fallback since `Shader.GetPropertyFlags(int)` and `Shader.GetPropertyAttributes(int)` are absent pre-2022.2
+- legacy Shader Graph schema normalization via `m_SerializedProperties` / `m_SerializableNodes` / `m_SerializableEdges` tested against Shader Graph 12.x format
+
+Known limitations on 2021.3:
+
+- `Shader.GetPropertyFlags(int)` and `Shader.GetPropertyAttributes(int)` not available; ShaderUtil-based fallback is best-effort
+- `Shader.GetPropertyRangeLimits(int)` not available; `ShaderUtil.GetRangeLimits` used instead
+- Shader Graph keywords are inferred from legacy serialized data and may differ from modern keyword definitions
 
 ### Unity 2019.4.41f2 notes
 

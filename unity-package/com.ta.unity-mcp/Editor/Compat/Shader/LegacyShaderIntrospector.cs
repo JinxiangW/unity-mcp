@@ -67,15 +67,19 @@ namespace TA.UnityMcp.Compat.Shader
                     }
                 }
 
+                var propertyName = ShaderReflectionCompat.GetLegacyPropertyName(shader, propertyIndex);
+
                 properties.Add(new ShaderPropertyDto
                 {
-                    name = ShaderReflectionCompat.GetLegacyPropertyName(shader, propertyIndex),
+                    name = propertyName,
                     description = ShaderReflectionCompat.GetLegacyPropertyDescription(shader, propertyIndex),
                     type = propertyType,
-                    flags = ShaderReflectionCompat.GetPropertyFlagsMethod?.Invoke(shader, new object[] { propertyIndex })?.ToString(),
+                    flags = (ShaderReflectionCompat.GetPropertyFlagsMethod?.Invoke(shader, new object[] { propertyIndex })
+                             ?? ShaderReflectionCompat.GetLegacyPropertyFlags(shader, propertyName))?.ToString(),
                     rangeMin = rangeMin,
                     rangeMax = rangeMax,
                     attributes = ShaderReflectionCompat.GetPropertyAttributesMethod?.Invoke(shader, new object[] { propertyIndex })
+                                 ?? ShaderReflectionCompat.GetLegacyPropertyAttributes(shader, propertyName)
                 });
             }
 

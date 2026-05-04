@@ -1,17 +1,17 @@
 # Unity MCP
 
-This project implements a focused Unity 6.3 MCP for material and rendering TA workflows.
+This project implements a focused Unity MCP for material and rendering TA workflows. The MCP layer exposes only basic low-level read queries. Higher-level workflows (material export, Shader Graph I/O analysis) are available as **Claude Code skills** that orchestrate MCP tools and standalone scripts.
 
-It is split into two pieces:
+It is split into three pieces:
 
-- `src/index.js`: a stdio MCP server that exposes Unity query tools and scoped material-transfer write tools.
+- `src/index.js`: a stdio MCP server that exposes 17 read-only Unity query tools.
 - `unity-package/com.ta.unity-mcp`: a Unity Editor package that serves local HTTP JSON endpoints backed by `AssetDatabase`, `SceneManager`, `EditorSceneManager`, and `ShaderUtil`.
+- `.claude/skills/`: Claude Code skills for high-level TA workflows (material export, shader graph analysis).
 
 ## What it supports
 
 - Asset info, dependencies, and reverse-reference lookup
 - Material info and shader linkage
-- Material export specs and Unity-project transfer packages for downstream migration workflows
 - Shader properties, keywords, fallback, custom editor, and usage lookup
 - Shader Graph structure inspection
 - Loaded scene info and renderer-material bindings
@@ -81,14 +81,12 @@ npm run export-material -- --path "Assets/Art/Wings/Wing_L.mat" --out "D:/export
 
 If you need a different port, set `UNITY_MCP_PORT` in both the Unity Editor environment and the MCP client environment.
 
-## Exposed MCP tools
+## Exposed MCP tools (17 read-only queries)
 
 - `get_asset_info`
 - `get_asset_dependencies`
 - `find_assets`
 - `get_material_info`
-- `get_material_export_spec`
-- `create_material_transfer_package`
 - `get_shader_info`
 - `find_materials_using_shader`
 - `get_shadergraph_info`
@@ -103,18 +101,17 @@ If you need a different port, set `UNITY_MCP_PORT` in both the Unity Editor envi
 - `get_project_settings`
 - `get_project_packages`
 
+Higher-level workflows (material export, Shader Graph I/O analysis) are available as skills — see `.claude/skills/`.
+
 ## Notes
 
 - `get_scene_info` and `get_scene_renderers` only inspect currently loaded scenes in the Editor.
 - `get_scene_lights` and `get_scene_volumes` support optional `scenePath`, `layers`, and `tag` filters.
 - Shader Graph parsing is structure-focused.
 - Shader usage lookups are exact by shader asset when a shader path or GUID is available. Name-only lookups remain best-effort and can still be ambiguous if a project contains multiple shaders with the same `Shader.name`.
-- `get_material_export_spec` returns a transfer-oriented JSON spec, suggested export filenames, and optional recursive Shader Graph bundle data.
-- `create_material_transfer_package` writes `manifest.json`, Shader Graph bundle JSON, copied textures, copied custom-function shader sources, and `verification_report.json` under `Assets/MCPExports/<MaterialName>` by default.
-- `get_material_export_spec` only maps base-map alpha to `opacity` when the material is transparent or alpha-clipped; opaque materials no longer claim opacity from base-map alpha by default.
-- `scripts/export-material-package.js` is the write-side bridge that consumes `get_material_export_spec` and writes `manifest.json`, optional Shader Graph bundle files, and copied textures into an output directory.
 - Shader Graph output is best-effort across Unity package versions; malformed or drifting graph files return stable JSON with `warnings` and, when needed, `parseError` instead of failing the whole route.
-- `/health` now includes timeout and compatibility metadata for quick diagnostics.
+- For material export and Shader Graph I/O analysis, use the skills in `.claude/skills/` or the scripts in `scripts/`.
+- `/health` includes timeout and compatibility metadata for quick diagnostics.
 - `UNITY_MCP_TIMEOUT_MS` configures the JS-side timeout and is mirrored by the Unity-side main-thread timeout with a small safety buffer.
 - `UNITY_MCP_LOG_REQUESTS=1` enables Unity-side request/response timing logs for diagnostics.
 - The Unity HTTP bridge is intended for local tooling, not browser clients. It does not enable cross-origin browser access, and `/health` avoids returning the project absolute path.
@@ -126,7 +123,12 @@ If you need a different port, set `UNITY_MCP_PORT` in both the Unity Editor envi
 - `docs/maintenance-strategy.md`
 - `docs/multi-version-compatibility.md`
 
-## Repo-local skill
+## Claude Code skills
+
+- `.claude/skills/unity-material-export/SKILL.md` — Material export workflow for downstream transfer
+- `.claude/skills/unity-shadergraph-analysis/SKILL.md` — Shader Graph I/O analysis and subgraph tracing
+
+## Agent playbooks (OpenCode)
 
 - `.opencode/skills/unity-mcp-playbook/SKILL.md`
 - `.opencode/skills/unity-version-adaptation-playbook/SKILL.md`
