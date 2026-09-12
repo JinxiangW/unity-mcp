@@ -146,6 +146,14 @@ namespace TA.UnityMcp
 
             try
             {
+                if (path == "/api/editor/refresh" || path == "/api/editor/play-mode" || path == "/api/editor/validation")
+                {
+                    if (context.Request.HttpMethod != "POST") { WriteJson(context.Response, 405, new { ok=false, error="Only POST is supported" }); return; }
+                    var body=ReadJsonBody(context.Request);
+                    var result=UnityMcpMainThread.Invoke(() => UnityMcpEditorControl.Request(path, body), MainThreadTimeoutMs);
+                    WriteJson(context.Response, 200, new { ok=true, data=result, timestampUtc=DateTime.UtcNow.ToString("O") });
+                    return;
+                }
                 if (path == "/api/materials/transfer-package")
                 {
                     if (context.Request.HttpMethod != "POST")
@@ -212,6 +220,9 @@ namespace TA.UnityMcp
 
                 switch (path)
                 {
+                    case "/api/editor/state":
+                        payload=UnityMcpMainThread.Invoke(UnityMcpEditorControl.State, MainThreadTimeoutMs);
+                        break;
                     case "/health":
                         payload = UnityMcpMainThread.Invoke(() => new
                         {

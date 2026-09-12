@@ -23,7 +23,7 @@ File: `unity-package/com.ta.unity-mcp/Editor/UnityMcpServer.cs`
 
 - Runs inside Unity Editor
 - Starts local HTTP listener on `127.0.0.1:51234`
-- Routes GET requests to query functions and the scoped POST material-transfer endpoint
+- Routes GET requests to query functions and scoped POST material-transfer/Editor workflow endpoints
 - Marshals work onto Unity main thread
 - Returns structured JSON envelopes
 
@@ -46,7 +46,7 @@ File: `unity-package/com.ta.unity-mcp/Editor/UnityShaderGraphTextParser.cs`
 ## Core invariants
 
 - Unity package is embedded and self-hosted inside the Editor
-- HTTP is local-only; write behavior is limited to explicit migration artifact endpoints
+- HTTP is local-only; write behavior is limited to explicit migration artifacts and the bounded Editor workflow
 - MCP server is stateless and restartable
 - Query code is allowed to be version-aware and best-effort
 - Tool contracts should be stable even if Unity internals vary slightly
@@ -73,7 +73,7 @@ File: `unity-package/com.ta.unity-mcp/Editor/UnityShaderGraphTextParser.cs`
 ## Things intentionally out of scope
 
 - Build pipeline
-- Enter/exit play mode
+- General Play automation outside the explicit bounded workflow
 - Menu execution
 - Arbitrary editor scripting
 - General asset mutation outside migration artifacts
@@ -82,3 +82,15 @@ File: `unity-package/com.ta.unity-mcp/Editor/UnityShaderGraphTextParser.cs`
 ## Planned compatibility abstraction
 
 If the repo expands to support multiple Unity versions, keep the protocol stable and isolate version differences in a `Compat` layer inside the Unity package. See `docs/multi-version-compatibility.md`.
+
+## Editor workflow extension
+
+`UnityMcpEditorControl.cs` owns the fixed validation registry, runtime-only background
+lease, persistent refresh/job state and bounded read-only camera diagnostics.
+`UnityMcpServer.cs` exposes the routes; `src/tools/editor.js` exposes four additional
+MCP tools. Bootstrap and mutation dispatch use `EditorApplication.update` and do not
+depend on Inspector updates. SessionState survives domain reload; validation reports
+and `mcp-job.json` are the completion evidence.
+
+The full state/whitelist/restore contract and recorded actual verification are in
+[editor-validation.md](editor-validation.md). No generic C# evaluator or menu executor is exposed.

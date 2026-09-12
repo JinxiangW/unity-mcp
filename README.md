@@ -1,10 +1,10 @@
 # Unity MCP
 
-This project implements a focused Unity MCP for material and rendering TA workflows. The MCP layer exposes only basic low-level read queries. Higher-level workflows (material export, Shader Graph I/O analysis) are available as **Claude Code skills** that orchestrate MCP tools and standalone scripts.
+This project implements a focused Unity MCP for material and rendering TA workflows. The MCP layer exposes 17 rendering queries and four bounded Editor workflow tools. Higher-level workflows (material export, Shader Graph I/O analysis) are available as **Claude Code skills** that orchestrate MCP tools and standalone scripts.
 
 It is split into three pieces:
 
-- `src/index.js`: a stdio MCP server that exposes 17 read-only Unity query tools.
+- `src/index.js`: a stdio MCP server exposing 17 rendering queries plus four bounded Editor workflow tools.
 - `unity-package/com.ta.unity-mcp`: a Unity Editor package that serves local HTTP JSON endpoints backed by `AssetDatabase`, `SceneManager`, `EditorSceneManager`, and `ShaderUtil`.
 - `.claude/skills/`: Claude Code skills for high-level TA workflows (material export, shader graph analysis).
 
@@ -21,13 +21,14 @@ It is split into three pieces:
 - Texture importer and platform override inspection
 - AnimatorController / AnimationClip structure inspection
 - Project settings and package manifest inspection
+- Editor state, background refresh with reload completion, explicit Play control and fixed Lobby AA validation entries
 
 ## What it does not do
 
-- No build or playmode control
+- No build control; Play control is limited to the four explicit actions documented below
 - No menu-command execution
 - No arbitrary C# execution
-- No arbitrary write or modify endpoints; V1 writes only material migration artifacts under `Assets/`
+- No arbitrary write or modify endpoints; writes are limited to material migration artifacts and the explicit validation/configuration workflow
 
 ## Folder layout
 
@@ -132,3 +133,16 @@ Higher-level workflows (material export, Shader Graph I/O analysis) are availabl
 
 - `.opencode/skills/unity-mcp-playbook/SKILL.md`
 - `.opencode/skills/unity-version-adaptation-playbook/SKILL.md`
+
+## Bounded Editor workflow (4 additional tools)
+
+- `get_editor_state`: compile/Play status, current camera and display state, bounded captured-object parameter reads.
+- `refresh_editor`: one background refresh request with a persistent request ID and real completion state.
+- `set_editor_play_mode`: `enter`, `exit`, `pause`, or `resume`; does not save or replace scenes.
+- `run_lobby_aa_validation`: twelve fixed entry names, fresh task-scoped output, asynchronous result tracking and conflict guards.
+
+See [Editor validation contract](docs/editor-validation.md) for the exact whitelist,
+background lease restoration, same-request reload polling, evidence and boundaries.
+The ordinary refresh path requires no window focus or manual refresh.
+Package NUnit tests are conditional on the optional `com.unity.test-framework`;
+not installing that package does not count as running those tests.

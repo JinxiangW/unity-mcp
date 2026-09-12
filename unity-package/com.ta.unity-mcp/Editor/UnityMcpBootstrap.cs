@@ -7,7 +7,8 @@ namespace TA.UnityMcp
     {
         static UnityMcpBootstrap()
         {
-            EditorApplication.delayCall += StartServer;
+            EditorApplication.update -= StartServer;
+            EditorApplication.update += StartServer;
             AssemblyReloadEvents.beforeAssemblyReload += StopServer;
             EditorApplication.quitting += StopServer;
         }
@@ -15,11 +16,13 @@ namespace TA.UnityMcp
         [InitializeOnLoadMethod]
         private static void Initialize()
         {
-            EditorApplication.delayCall += StartServer;
+            EditorApplication.update -= StartServer;
+            EditorApplication.update += StartServer;
         }
 
         private static void StartServer()
         {
+            EditorApplication.update -= StartServer;
             UnityMcpServer.Instance.Start();
         }
 

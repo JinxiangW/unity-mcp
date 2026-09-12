@@ -1,3 +1,4 @@
+import { editorTools, callEditorTool } from "./editor.js";
 import { assetTools, callAssetTool } from "./assets.js";
 import { materialTools, callMaterialTool } from "./materials.js";
 import { shaderTools, callShaderTool } from "./shaders.js";
@@ -8,6 +9,7 @@ import { animationTools, callAnimationTool } from "./animations.js";
 import { projectTools, callProjectTool } from "./project.js";
 
 export const tools = [
+  ...editorTools,
   ...assetTools,
   ...materialTools,
   ...shaderTools,
@@ -19,6 +21,7 @@ export const tools = [
 ];
 
 const callers = [
+  callEditorTool,
   callAssetTool,
   callMaterialTool,
   callShaderTool,

@@ -93,3 +93,11 @@ When Unity returns awkward or mixed results, use this rule:
 - platform-specific compiled shader output analysis
 - anything that requires build steps or scene execution
 - broad generic Unity tooling outside rendering TA workflows
+
+## Approved bounded Editor workflow
+
+The 2026-09-12 explicit local Editor extension is the scoped exception to the older
+scene-execution restriction above. It is limited to the four tools and twelve fixed
+validation entries in [editor-validation.md](editor-validation.md). Preserve their
+request identity, output boundary and background-state restoration; do not broaden
+them into an evaluator, general scene controller or build interface.

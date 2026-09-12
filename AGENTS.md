@@ -20,9 +20,9 @@ This repo is a focused, Unity MCP for material and rendering TA workflows.
 
 ## Non-negotiable constraints
 
-- V1 write scope is limited to material migration artifacts under `Assets/`
+- General write scope is limited to material migration artifacts under `Assets/`, plus the explicitly authorized bounded Editor workflow below
 - No build control
-- No playmode control
+- No Play control outside the explicit `enter`/`exit`/`pause`/`resume` workflow
 - No arbitrary C# execution
 - No broad `set`, `modify`, `execute`, or hidden write side effects
 - Return structured JSON only
@@ -59,3 +59,16 @@ When Unity is open, verify in this order:
 - New endpoint returns JSON and fails safely
 - README/docs mention the new capability
 - Write-scope constraints still hold
+
+## Explicit local Editor validation extension (2026-09-12)
+
+The user authorized `get_editor_state`, `refresh_editor`, `set_editor_play_mode`,
+and `run_lobby_aa_validation` for the current Editor and twelve fixed validation entries.
+See [docs/editor-validation.md](docs/editor-validation.md) for exact names and paths.
+No arbitrary C#, menus, builds, or broad asset mutation is permitted.
+
+Normal refresh is automatic through the update pump, without focus. On transient
+reload disconnect, poll the same refresh request ID rather than repeating the mutation.
+HTTP accepted is not passed; inspect finished/passed and compiler state.
+Keep the background Play lease temporary and restore the original runtime flag on
+completion/interruption.

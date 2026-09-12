@@ -40,7 +40,7 @@ test("tool registry includes all read-only query endpoints", () => {
     assert.ok(names.includes(requiredName), `${requiredName} missing`);
   }
 
-  assert.equal(names.length, 17, "MCP should expose exactly 17 read-only tools");
+  assert.equal(names.length, 21, "MCP exposes 17 existing queries plus four bounded Editor tools");
 });
 
 test("callUnityTool dispatches to prefab route", async () => {
