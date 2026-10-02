@@ -11,6 +11,13 @@ namespace TA.UnityMcp.Compat.ShaderGraph
             public List<JObject> objects = new List<JObject>();
             public List<string> warnings = new List<string>();
             public string parseError;
+
+            public int objectCount => objects.Count;
+
+            public string FirstObjectString(string propertyName)
+            {
+                return objects.Count == 0 ? null : objects[0].Value<string>(propertyName);
+            }
         }
 
         public static ParseResult ParseObjects(string text)

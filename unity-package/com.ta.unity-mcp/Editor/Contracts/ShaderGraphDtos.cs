@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 
 namespace TA.UnityMcp.Contracts
 {
+    [Serializable]
     internal sealed class ShaderGraphPropertyDto
     {
         public string objectId;
@@ -11,6 +13,7 @@ namespace TA.UnityMcp.Contracts
         public string valueType;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphKeywordDto
     {
         public string objectId;
@@ -21,6 +24,7 @@ namespace TA.UnityMcp.Contracts
         public string scope;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphCategoryDto
     {
         public string objectId;
@@ -28,6 +32,7 @@ namespace TA.UnityMcp.Contracts
         public int childCount;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphPositionDto
     {
         public float? x;
@@ -36,6 +41,7 @@ namespace TA.UnityMcp.Contracts
         public float? height;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphSlotDto
     {
         public string objectId;
@@ -49,6 +55,7 @@ namespace TA.UnityMcp.Contracts
         public bool? hidden;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphNodeDto
     {
         public string objectId;
@@ -61,6 +68,7 @@ namespace TA.UnityMcp.Contracts
         public List<ShaderGraphSlotDto> outputSlots;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphEdgeDto
     {
         public string objectId;
@@ -72,6 +80,7 @@ namespace TA.UnityMcp.Contracts
         public string inputSlotName;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphSubGraphDto
     {
         public string objectId;
@@ -79,6 +88,7 @@ namespace TA.UnityMcp.Contracts
         public string subGraphGuid;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphTargetDto
     {
         public string objectId;
@@ -87,6 +97,7 @@ namespace TA.UnityMcp.Contracts
         public string activeSubTarget;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphBlockDto
     {
         public string objectId;
@@ -94,6 +105,7 @@ namespace TA.UnityMcp.Contracts
         public string descriptor;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphObjectReferenceDto
     {
         public string objectId;
@@ -101,6 +113,7 @@ namespace TA.UnityMcp.Contracts
         public string displayName;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphOutputDto
     {
         public List<ShaderGraphBlockDto> vertexBlocks;
@@ -108,6 +121,7 @@ namespace TA.UnityMcp.Contracts
         public ShaderGraphObjectReferenceDto outputNode;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphInfoDto
     {
         public string format;
@@ -128,6 +142,7 @@ namespace TA.UnityMcp.Contracts
         public ShaderGraphOutputDto output;
     }
 
+    [Serializable]
     internal sealed class ShaderGraphReadResultDto
     {
         public int sourceLength;

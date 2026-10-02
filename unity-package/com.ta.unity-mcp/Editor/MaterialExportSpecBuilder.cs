@@ -16,7 +16,8 @@ namespace TA.UnityMcp
     {
         public static JObject Build(Material material, string assetPath, string exportProfile, bool includeShaderGraph, bool recursiveShaderGraphs, bool includeRawProperties)
         {
-            exportProfile = string.IsNullOrWhiteSpace(exportProfile) ? "ue-pbr" : exportProfile.Trim();
+            var profile = MaterialExportProfiles.Resolve(exportProfile);
+            exportProfile = profile.name;
 
             var properties = CompatServices.Shader.ReadMaterialProperties(material);
             var propertyMap = properties.ToDictionary(property => property.name, StringComparer.Ordinal);
@@ -96,20 +97,20 @@ namespace TA.UnityMcp
             }
 
             var textures = new JArray();
-            AddTextureExport(textures, material.name, "baseColor", "_BaseMap", baseMapProperty, BuildChannelPacking("baseColor.r", "baseColor.g", "baseColor.b", usesBaseMapAlphaAsOpacity ? "opacity" : null));
-            AddTextureExport(textures, material.name, "normal", "_BumpMap", normalMapProperty, new JObject { ["rgb"] = "normal" });
-            AddTextureExport(textures, material.name, "metallicRoughnessMask", "_MetallicGlossMap", metallicMapProperty, new JObject { ["r"] = "metallic", ["a"] = "smoothness" });
-            AddTextureExport(textures, material.name, "occlusion", "_OcclusionMap", occlusionMapProperty, new JObject { ["g"] = "occlusion" });
-            AddTextureExport(textures, material.name, "emission", "_EmissionMap", emissionMapProperty, new JObject { ["rgb"] = "emission" });
-            AddTextureExport(textures, material.name, "custom.guideTexture", "_GuideTexture", guideTextureProperty, new JObject { ["rgba"] = "custom.guideTexture" });
+            AddTextureExport(profile, textures, material.name, "baseColor", "_BaseMap", baseMapProperty, BuildChannelPacking("baseColor.r", "baseColor.g", "baseColor.b", usesBaseMapAlphaAsOpacity ? "opacity" : null));
+            AddTextureExport(profile, textures, material.name, "normal", "_BumpMap", normalMapProperty, new JObject { ["rgb"] = "normal" });
+            AddTextureExport(profile, textures, material.name, "metallicRoughnessMask", "_MetallicGlossMap", metallicMapProperty, new JObject { ["r"] = "metallic", ["a"] = "smoothness" });
+            AddTextureExport(profile, textures, material.name, "occlusion", "_OcclusionMap", occlusionMapProperty, new JObject { ["g"] = "occlusion" });
+            AddTextureExport(profile, textures, material.name, "emission", "_EmissionMap", emissionMapProperty, new JObject { ["rgb"] = "emission" });
+            AddTextureExport(profile, textures, material.name, "custom.guideTexture", "_GuideTexture", guideTextureProperty, new JObject { ["rgba"] = "custom.guideTexture" });
 
             var customSemanticGroups = new JArray();
-            AddCustomSemanticGroup(customSemanticGroups, "custom.guideTexture", guideTextureProperty, new[] { "_GuideTexture", "_GuideTiling", "_GuideStrength" }, new JObject
+            AddCustomSemanticGroup(profile, customSemanticGroups, "custom.guideTexture", guideTextureProperty, new[] { "_GuideTexture", "_GuideTiling", "_GuideStrength" }, new JObject
             {
                 ["guideTiling"] = ToJToken(GetFloatValue(guideTilingProperty)),
                 ["guideStrength"] = ToJToken(GetFloatValue(guideStrengthProperty))
             });
-            AddCustomSemanticGroup(customSemanticGroups, "dissolve", null, new[]
+            AddCustomSemanticGroup(profile, customSemanticGroups, "dissolve", null, new[]
             {
                 "_Invert",
                 "_UseBackColor",
@@ -125,7 +126,7 @@ namespace TA.UnityMcp
                 "_GlareSmoothness",
                 "_GlareOffset"
             }, null);
-            AddCustomSemanticGroup(customSemanticGroups, "displacement", null, new[]
+            AddCustomSemanticGroup(profile, customSemanticGroups, "displacement", null, new[]
             {
                 "_DisplacementPerVertex",
                 "_DisplacementSmoothness",
@@ -170,10 +171,11 @@ namespace TA.UnityMcp
                 ["classification"] = new JObject
                 {
                     ["supported"] = true,
+                    ["profileKnown"] = profile.isKnown,
                     ["transferMode"] = transferMode,
                     ["confidence"] = confidence,
-                    ["targetModel"] = exportProfile,
-                    ["notes"] = new JArray(BuildClassificationNotes(isShaderGraph, includeShaderGraph, recursiveShaderGraphs))
+                    ["targetModel"] = profile.targetModel,
+                    ["notes"] = new JArray(profile.BuildClassificationNotes(isShaderGraph, includeShaderGraph, recursiveShaderGraphs))
                 },
                 ["surface"] = new JObject
                 {
@@ -202,14 +204,14 @@ namespace TA.UnityMcp
 
             spec["semantics"]["baseColor"] = BuildTextureSemantic(
                 baseMapProperty,
-                "baseColor",
+                profile.GetTextureExportId("baseColor"),
                 new[] { "_BaseColor", "_BaseMap" },
                 baseColorProperty != null ? ToJToken(baseColorProperty.value) : JValue.CreateNull(),
                 null,
                 BuildUvTransform(baseMapProperty));
             spec["semantics"]["normal"] = BuildTextureSemantic(
                 normalMapProperty,
-                "normal",
+                profile.GetTextureExportId("normal"),
                 new[] { "_BumpMap" },
                 JValue.CreateNull(),
                 null,
@@ -218,7 +220,7 @@ namespace TA.UnityMcp
             spec["semantics"]["metallic"] = new JObject
             {
                 ["value"] = ToJToken(GetFloatValue(metallicProperty)),
-                ["textureId"] = GetTextureReference(metallicMapProperty) != null ? "metallicRoughnessMask" : null,
+                ["textureId"] = GetTextureReference(metallicMapProperty) != null ? profile.GetTextureExportId("metallicRoughnessMask") : null,
                 ["channel"] = GetTextureReference(metallicMapProperty) != null ? "r" : null,
                 ["rawPropertyNames"] = new JArray("_Metallic", "_MetallicGlossMap", "_Use_Metallic_Texture")
             };
@@ -226,7 +228,7 @@ namespace TA.UnityMcp
             {
                 ["value"] = ToJToken(roughness),
                 ["source"] = roughness.HasValue ? "derived_from_smoothness" : null,
-                ["textureId"] = GetTextureReference(metallicMapProperty) != null ? "metallicRoughnessMask" : null,
+                ["textureId"] = GetTextureReference(metallicMapProperty) != null ? profile.GetTextureExportId("metallicRoughnessMask") : null,
                 ["channel"] = GetTextureReference(metallicMapProperty) != null ? "a" : null,
                 ["rawPropertyNames"] = new JArray("_Smoothness", "_MetallicGlossMap"),
                 ["conversion"] = roughness.HasValue ? new JObject
@@ -239,20 +241,20 @@ namespace TA.UnityMcp
             {
                 ["enabled"] = (GetFloatValue(emissionToggleProperty) ?? 0f) > 0f,
                 ["color"] = emissionColorProperty != null ? ToJToken(emissionColorProperty.value) : JValue.CreateNull(),
-                ["textureId"] = GetTextureReference(emissionMapProperty) != null ? "emission" : null,
+                ["textureId"] = GetTextureReference(emissionMapProperty) != null ? profile.GetTextureExportId("emission") : null,
                 ["rawPropertyNames"] = new JArray("_Use_Emission", "_EmissionColor", "_EmissionMap")
             };
             spec["semantics"]["opacity"] = new JObject
             {
                 ["value"] = opacityValue,
-                ["textureId"] = usesBaseMapAlphaAsOpacity && GetTextureReference(baseMapProperty) != null ? "baseColor" : null,
+                ["textureId"] = usesBaseMapAlphaAsOpacity && GetTextureReference(baseMapProperty) != null ? profile.GetTextureExportId("baseColor") : null,
                 ["channel"] = usesBaseMapAlphaAsOpacity && GetTextureReference(baseMapProperty) != null ? "a" : null,
                 ["rawPropertyNames"] = new JArray("_BaseMap", "_Cutoff")
             };
             spec["semantics"]["occlusion"] = new JObject
             {
                 ["value"] = ToJToken(GetFloatValue(occlusionStrengthProperty)),
-                ["textureId"] = GetTextureReference(occlusionMapProperty) != null ? "occlusion" : null,
+                ["textureId"] = GetTextureReference(occlusionMapProperty) != null ? profile.GetTextureExportId("occlusion") : null,
                 ["channel"] = GetTextureReference(occlusionMapProperty) != null ? "g" : null,
                 ["rawPropertyNames"] = new JArray("_OcclusionMap", "_OcclusionStrength")
             };
@@ -346,7 +348,7 @@ namespace TA.UnityMcp
                 {
                     ["name"] = property.name,
                     ["type"] = property.type,
-                    ["mappedSemantic"] = ToJToken(GetMappedSemantic(property.name)),
+                    ["mappedSemantic"] = ToJToken(MaterialExportSemantics.MapPropertyName(property.name)),
                     ["value"] = ToJToken(property.value)
                 });
             }
@@ -386,7 +388,7 @@ namespace TA.UnityMcp
             };
         }
 
-        private static void AddTextureExport(JArray textures, string materialName, string semantic, string propertyName, MaterialPropertyDto property, JObject channelPacking)
+        private static void AddTextureExport(MaterialExportProfile profile, JArray textures, string materialName, string semantic, string propertyName, MaterialPropertyDto property, JObject channelPacking)
         {
             var textureReference = GetTextureReference(property);
             if (textureReference == null)
@@ -403,7 +405,7 @@ namespace TA.UnityMcp
 
             textures.Add(new JObject
             {
-                ["id"] = GetTextureExportId(semantic),
+                ["id"] = profile.GetTextureExportId(semantic),
                 ["semantic"] = semantic,
                 ["unityPropertyName"] = propertyName,
                 ["asset"] = JObject.FromObject(textureReference),
@@ -415,8 +417,8 @@ namespace TA.UnityMcp
                 },
                 ["exportFile"] = new JObject
                 {
-                    ["fileName"] = $"{materialName}__{GetSuggestedTextureExportName(semantic)}{extension}",
-                    ["relativePath"] = $"{materialName}__{GetSuggestedTextureExportName(semantic)}{extension}"
+                    ["fileName"] = $"{materialName}__{profile.GetSuggestedTextureExportName(semantic)}{extension}",
+                    ["relativePath"] = $"{materialName}__{profile.GetSuggestedTextureExportName(semantic)}{extension}"
                 },
                 ["usage"] = new JObject
                 {
@@ -429,12 +431,12 @@ namespace TA.UnityMcp
             });
         }
 
-        private static void AddCustomSemanticGroup(JArray customSemanticGroups, string semantic, MaterialPropertyDto textureProperty, IEnumerable<string> rawPropertyNames, JObject parameters)
+        private static void AddCustomSemanticGroup(MaterialExportProfile profile, JArray customSemanticGroups, string semantic, MaterialPropertyDto textureProperty, IEnumerable<string> rawPropertyNames, JObject parameters)
         {
             customSemanticGroups.Add(new JObject
             {
                 ["semantic"] = semantic,
-                ["textureId"] = ToJToken(GetTextureReference(textureProperty) != null ? GetTextureExportId(semantic) : null),
+                ["textureId"] = ToJToken(GetTextureReference(textureProperty) != null ? profile.GetTextureExportId(semantic) : null),
                 ["rawPropertyNames"] = new JArray(rawPropertyNames),
                 ["parameters"] = ToJToken(parameters)
             });
@@ -469,34 +471,6 @@ namespace TA.UnityMcp
                     return valueObject["scale"];
                 case "offset":
                     return valueObject["offset"];
-                default:
-                    return null;
-            }
-        }
-
-        private static string GetMappedSemantic(string propertyName)
-        {
-            switch (propertyName)
-            {
-                case "_BaseColor":
-                case "_BaseMap":
-                    return "baseColor";
-                case "_BumpMap":
-                    return "normal";
-                case "_Metallic":
-                case "_MetallicGlossMap":
-                    return "metallic";
-                case "_Smoothness":
-                    return "roughness";
-                case "_OcclusionMap":
-                case "_OcclusionStrength":
-                    return "occlusion";
-                case "_EmissionColor":
-                case "_EmissionMap":
-                case "_Use_Emission":
-                    return "emission";
-                case "_Cutoff":
-                    return "opacity";
                 default:
                     return null;
             }
@@ -587,23 +561,6 @@ namespace TA.UnityMcp
             return "Custom";
         }
 
-        private static IEnumerable<string> BuildClassificationNotes(bool isShaderGraph, bool includeShaderGraph, bool recursiveShaderGraphs)
-        {
-            yield return "Core PBR channels are exported as transferable semantics.";
-
-            if (isShaderGraph)
-            {
-                yield return "This material is driven by a Shader Graph and may require custom graph reconstruction in downstream tools.";
-            }
-
-            if (includeShaderGraph)
-            {
-                yield return recursiveShaderGraphs
-                    ? "Shader Graph bundle includes recursively referenced subgraphs."
-                    : "Shader Graph bundle only includes the main graph; subgraph references are preserved but not expanded.";
-            }
-        }
-
         private static JObject BuildWarning(string code, string message, string severity)
         {
             return new JObject
@@ -623,46 +580,6 @@ namespace TA.UnityMcp
                 ["b"] = ToJToken(b),
                 ["a"] = ToJToken(a)
             };
-        }
-
-        private static string GetTextureExportId(string semantic)
-        {
-            switch (semantic)
-            {
-                case "baseColor":
-                    return "baseColor";
-                case "normal":
-                    return "normal";
-                case "metallicRoughnessMask":
-                    return "metallicRoughnessMask";
-                case "occlusion":
-                    return "occlusion";
-                case "emission":
-                    return "emission";
-                default:
-                    return semantic.Replace('.', '_');
-            }
-        }
-
-        private static string GetSuggestedTextureExportName(string semantic)
-        {
-            switch (semantic)
-            {
-                case "baseColor":
-                    return "BaseColor";
-                case "normal":
-                    return "Normal";
-                case "metallicRoughnessMask":
-                    return "MetallicRoughnessMask";
-                case "occlusion":
-                    return "Occlusion";
-                case "emission":
-                    return "Emission";
-                case "custom.guideTexture":
-                    return "GuideTexture";
-                default:
-                    return semantic.Replace('.', '_');
-            }
         }
 
         private static JObject BuildWorldDissolveRuntimeExport(Material material, string materialAssetPath)

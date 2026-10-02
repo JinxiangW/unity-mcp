@@ -6,15 +6,16 @@
 
 ## P0 - 质量与可维护性
 
-- [ ] **拆分 `UnityMcpQueries.cs`**
+- [x] **拆分 `UnityMcpQueries.cs`**
   - 已抽出 `MaterialExportSpecBuilder.cs`
   - 已抽出 `ShaderGraphBundleBuilder.cs`
   - 查询入口已开始改为委托 builder
-  - 仍需继续清理 `UnityMcpQueries.cs` 中残留 helper，进一步收敛到“简单查询 + 分发”
+  - 已继续抽出资产依赖、场景、Shader 使用关系、Prefab 层级等 support 类
+  - `UnityMcpQueries.cs` 已进一步收敛到查询入口、分发和少量共享 DTO/路径工具
 
-- [ ] **补自动化测试**
+- [x] **补自动化测试**
   - 已新增 Node 侧自动化测试，覆盖工具注册、调用分发、结果归一化
-  - 仍需补 Unity/C# 侧 NUnit 测试，覆盖材质导出语义映射、ShaderGraph 解析和 DTO 往返
+  - 已新增 Unity/C# 侧 Editor NUnit 测试，覆盖 export profile 策略、ShaderGraph 解析和 DTO 往返
 
 - [x] **统一 C# 层异常处理**
   - 统一错误响应：`errorCode + error + context + details`
@@ -65,9 +66,9 @@
 
 ## P3 - 改进与优化
 
-- [ ] **导出 profile 可扩展化**
+- [x] **导出 profile 可扩展化**
   - 当前仍以内置 `"ue-pbr"` 为主
-  - 后续应抽为独立配置或策略类
+  - 已抽为 `MaterialExportProfiles` / `MaterialExportProfile` 策略入口，未知 profile 保持向后兼容透传
 
 - [x] **健康检查增强**
   - `/health` 已返回 timeout 和兼容性摘要

@@ -130,3 +130,15 @@ also reports filter/collapse/error-visibility flags and `filtersUnchanged`; filt
 empty results are not evidence of no errors. `available=false` means read capability
 failed, not zero errors. The read uses balanced StartGettingEntries/EndGettingEntries
 and never clears the Console, changes filters or opens/focuses a window.
+
+
+## Endfield URP migration validation (2026-09-14)
+Authorized fixed entries: urp-scene, urp-game, urp-baseline-scene, urp-setup-fault, urp-post-fault, urp-tone, urp-overlay-reload, urp-material-workflow. They invoke installed project diagnostic APIs only, with fresh output restricted to D:/Endfield/Delivery/evidence/Audits/URPMigration20260914_01. No arbitrary code/menu execution. Accepted response includes jobId; get_editor_state.validation exposes running/finished/passed/result and material workflow progress. The material workflow deliberately crosses its own reload and exit phases; those two declared phases retain the job, all other interruption rules remain. Tests preserve original dirty Scene, and may allocate temporary diagnostic fixtures or update owned compatibility assets only within their documented validation scope.
+
+Additional fixed migration entries: urp-shadow-flags (temporarily toggle one original Renderer and restore, no Scene save), urp-bound-response (eight existing variants, visible temporary material edit/revert), urp-cloth-inputs (same-frame read-only input capture), urp-irradiance-import (Edit-only persistent GI import with source/GPU/reload checks; release Scene frames after resource replacement). Same bounded evidence root/job protocol applies.
+
+Controlled cancellation: cancel_urp_validation requires the exact active jobId and currently supports only urp-bound-response, whose installed Cancel restores temporary edits/animation/AA and writes a failed report. Unknown job IDs, other suites, and compilation/update windows are refused. Existing Play/refresh guards remain unchanged.
+
+`urp-scene-lifecycle` executes the installed bounded SceneView suite in dedicated Play, exposes progress text via get_editor_state.validation, and supports exact-job cancellation after pending GPU work and owned-view/fixture restoration. It exports native Orientation Gizmo render targets through Unity APIs, not desktop screenshots or simulated OS input.
+
+Bounded baseline handoff: `urp-baseline-hop-check` verifies the fixed live safety snapshot and inventories persistent dirty assets plus ShaderUtil batching compatibility. `urp-baseline-hop-exit` repeats those guards and schedules EditorApplication.Exit only if safe; it never saves the original scene.

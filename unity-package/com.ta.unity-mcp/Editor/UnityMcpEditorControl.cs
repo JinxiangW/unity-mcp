@@ -77,6 +77,7 @@ namespace TA.UnityMcp
             EndBackgroundValidation();
             job["running"]=false;job["finished"]=true;job["passed"]=passed;job["error"]=error;
             job["result"]=result;job["finishedUtc"]=DateTime.UtcNow.ToString("O");
+            if((bool?)job["cancelRequested"]==true)job["cancelled"]=result!=null&&(bool?)result["finished"]==true&&(bool?)result["restored"]==true;
             if(error!=null)lastError=error;
             Directory.CreateDirectory((string)job["output"]);SaveJob();
         }
@@ -85,7 +86,11 @@ namespace TA.UnityMcp
             if(job==null||(bool?)job["running"]!=true||EditorApplication.timeSinceStartup<nextPoll)return;
             nextPoll=EditorApplication.timeSinceStartup+.25;
             string path=(string)job["reportPath"],entry=(string)job["entry"];
-            if(entry!="preview"&&entry!="preview-restart"&&entry!="diagnostic-preview"&&entry!="dynamic"&&entry!="lifecycle"&&entry!="regression"&&entry!="repair-check"&&entry!="repair-restore")return;
+            if(entry.StartsWith("urp-",StringComparison.Ordinal)&&(DateTimeOffset.UtcNow-job["startedUtc"].ToObject<DateTimeOffset>()).TotalSeconds>360){FinishJob(false,"URP validation exceeded 360s without finished report; inspect owned fixture cleanup before retry");return;}
+            if(entry=="urp-material-workflow"){string saved=SessionState.GetString("Endfield.UrpMaterialValidation","");if(!string.IsNullOrEmpty(saved))job["progress"]=JObject.Parse(saved);}
+            if(entry=="urp-prefab-boundary"){var type=AppDomain.CurrentDomain.GetAssemblies().Where(a=>a.GetName().Name=="Assembly-CSharp-Editor").Select(a=>a.GetType("Endfield.Diagnostics.Editor.CharacterUrpPrefabBoundaryValidation",false)).FirstOrDefault(t=>t!=null);if(type!=null)job["progress"]=(string)type.GetMethod("Status",Type.EmptyTypes).Invoke(null,null);}
+            if(entry=="urp-scene-lifecycle"){var type=AppDomain.CurrentDomain.GetAssemblies().Where(a=>a.GetName().Name=="Assembly-CSharp-Editor").Select(a=>a.GetType("Endfield.Diagnostics.Editor.CharacterUrpSceneValidation",false)).FirstOrDefault(t=>t!=null);if(type!=null)job["progress"]=(string)type.GetMethod("Status",Type.EmptyTypes).Invoke(null,null);}
+            if(!entry.StartsWith("urp-",StringComparison.Ordinal)&&entry!="preview"&&entry!="preview-restart"&&entry!="diagnostic-preview"&&entry!="dynamic"&&entry!="lifecycle"&&entry!="regression"&&entry!="repair-check"&&entry!="repair-restore")return;
             if(File.Exists(path))try {
                 var report=JObject.Parse(File.ReadAllText(path));
                 if((bool?)report["finished"]==true){FinishJob((bool?)report["passed"]==true,(string)report["error"],report);return;}
@@ -94,7 +99,7 @@ namespace TA.UnityMcp
         }
         static void InterruptJob(string reason)
         {
-            PollJob();if(job!=null&&(bool?)job["running"]==true)FinishJob(false,reason);
+            PollJob();if((string)job?["entry"]=="urp-material-workflow"){string saved=SessionState.GetString("Endfield.UrpMaterialValidation","");if(!string.IsNullOrEmpty(saved)){string phase=(string)JObject.Parse(saved)["phase"];if(((phase=="reload"||phase=="exit")&&reason.Contains("assembly reload"))||(phase=="exit"&&reason.Contains("Play exit"))){SaveJob();return;}}}if(job!=null&&(bool?)job["running"]==true)FinishJob(false,reason);
         }
         static object ConsoleCompileErrors()
         {
@@ -166,7 +171,7 @@ namespace TA.UnityMcp
                 if((bool?)refresh["finished"]!=true){refresh["reloadObserved"]=true;refresh["phase"]="reloaded";refreshQuietAfter=EditorApplication.timeSinceStartup+.5;SaveRefresh();}
             }
             string persisted=SessionState.GetString(JobKey,"");
-            if(!string.IsNullOrEmpty(persisted)){job=JObject.Parse(persisted);if((bool?)job["running"]==true)FinishJob(false,"Validation interrupted by domain reload");}
+            if(!string.IsNullOrEmpty(persisted)){job=JObject.Parse(persisted);if((bool?)job["running"]==true){string savedWorkflow=SessionState.GetString("Endfield.UrpMaterialValidation","");bool declaredReload=(string)job["entry"]=="urp-material-workflow"&&!string.IsNullOrEmpty(savedWorkflow)&&new[]{"reload","exit"}.Contains((string)JObject.Parse(savedWorkflow)["phase"])&&string.Equals(Path.GetFullPath((string)JObject.Parse(savedWorkflow)["directory"]),Path.GetFullPath((string)job["output"]),StringComparison.OrdinalIgnoreCase);if(!declaredReload)FinishJob(false,"Validation interrupted by domain reload");}}
             string previousDiagnostics=SessionState.GetString(DiagnosticsKey,"");
             if(!string.IsNullOrEmpty(previousDiagnostics)){diagnostics.AddRange(JArray.Parse(previousDiagnostics).Select(x=>(object)x));diagnosticsObserved=true;}
             EditorApplication.update+=PollJob;
@@ -230,11 +235,24 @@ namespace TA.UnityMcp
                 capturedObjects=CapturedObjectBindings(camera),camera=camera==null?null:new {name=camera.name,instanceId=camera.GetInstanceID(),position=new[]{position.x,position.y,position.z},rotation=new[]{rotation.x,rotation.y,rotation.z,rotation.w},fieldOfView=camera.fieldOfView,near=camera.nearClipPlane,far=camera.farClipPlane,aspect=camera.aspect,orthographic=camera.orthographic,orthographicSize=camera.orthographicSize,projectionMode=cameraMode==null?(int?)null:Convert.ToInt32(cameraMode),projectionModeName=cameraMode?.ToString(),projectionMatrix=MatrixValues(camera.projectionMatrix),enabled=camera.enabled,active=camera.gameObject.activeInHierarchy,target=target==null?null:target.name,width=target==null?0:target.width,height=target==null?0:target.height,targetCreated=target!=null&&target.IsCreated()},
                 preCullSubscribers=Camera.onPreCull?.GetInvocationList().Length??0,postRenderSubscribers=Camera.onPostRender?.GetInvocationList().Length??0};
         }
+        static object SceneWindowInventory()
+        {
+            var flags=BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic;
+            return SceneView.sceneViews.Cast<SceneView>().Where(v=>v!=null).Select(v=>
+            {
+                object gizmo=typeof(SceneView).GetField("m_OrientationGizmo",flags)?.GetValue(v);
+                var gc=gizmo==null?null:gizmo.GetType().GetField("m_Camera",flags)?.GetValue(gizmo) as Camera;
+                var rt=gizmo==null?null:gizmo.GetType().GetField("m_RenderTexture",flags)?.GetValue(gizmo) as RenderTexture;
+                return new {viewId=v.GetInstanceID(),title=v.titleContent.text,cameraId=v.camera==null?0:v.camera.GetInstanceID(),position=new[]{v.position.x,v.position.y,v.position.width,v.position.height},gizmoCameraId=gc==null?0:gc.GetInstanceID(),gizmoRtId=rt==null?0:rt.GetInstanceID(),gizmoRtCreated=rt!=null&&rt.IsCreated()};
+            }).ToArray();
+        }
+        static object CameraInventory(){return Resources.FindObjectsOfTypeAll<Camera>().Where(c=>c!=null).Select(c=>new{id=c.GetInstanceID(),name=c.name,type=c.cameraType.ToString(),enabled=c.enabled,persistent=EditorUtility.IsPersistent(c),sceneValid=c.gameObject.scene.IsValid(),scene=c.gameObject.scene.path,hideFlags=c.hideFlags.ToString(),objectHideFlags=c.gameObject.hideFlags.ToString(),targetId=c.targetTexture==null?0:c.targetTexture.GetInstanceID()}).ToArray();}
         public static object State()
         {
             PollJob();PollRefresh();var scene=SceneManager.GetActiveScene();
             return new { processId=System.Diagnostics.Process.GetCurrentProcess().Id, unityVersion=Application.unityVersion,
                 isPlaying=EditorApplication.isPlaying,isPaused=EditorApplication.isPaused,isCompiling=EditorApplication.isCompiling,isUpdating=EditorApplication.isUpdating,
+                sceneViewWindows=SceneWindowInventory(),cameraInventory=CameraInventory(),prefabStagePath=UnityEditor.SceneManagement.PrefabStageUtility.GetCurrentPrefabStage()?.assetPath,
                 backgroundValidation=new {owned=backgroundOwned,previousRunInBackground,queueRequests=backgroundQueueRequests},runtime=RuntimeState(),applicationFocused=UnityEditorInternal.InternalEditorUtility.isApplicationActive,bridgeRevision=BridgeRevision,refreshAcceptanceMarker=RefreshAcceptanceMarker,loadedAssemblyId=AssemblyId,refresh,
                 scene=scene.path,isDirty=scene.isDirty,pending,lastRequest,lastError,diagnostics,
                 compilerFailed=EditorUtility.scriptCompilationFailed,diagnosticsObserved,consoleCompileErrors=ConsoleCompileErrors(),consoleErrors=ConsoleErrors(),validation=job,
@@ -242,6 +260,16 @@ namespace TA.UnityMcp
         }
         public static object Request(string route,JObject body)
         {
+            if(route=="/api/editor/validation-cancel")
+            {
+                PollJob();if(job==null||(bool?)job["running"]!=true||(string)job["jobId"]!=(string)body["jobId"])throw new InvalidOperationException("No matching active validation job");
+                if(!new[]{"urp-bound-response","urp-scene-lifecycle","urp-pantyhose","urp-prefab-boundary","urp-panty-ingestion","urp-panty-aligned","urp-mpb-timing-a","urp-mpb-timing-b","urp-fullchain-aligned","urp-taa-start"}.Contains((string)job["entry"]))throw new InvalidOperationException("This suite has no installed safe cancellation contract");
+                if(pending||EditorApplication.isCompiling||EditorApplication.isUpdating)throw new InvalidOperationException("Editor is busy; cancellation not dispatched");
+                var target=AppDomain.CurrentDomain.GetAssemblies().Where(a=>a.GetName().Name=="Assembly-CSharp-Editor").Select(a=>a.GetType((string)job["entry"]=="urp-bound-response"?"Endfield.Diagnostics.Editor.CharacterUrpBoundResponseValidation":(string)job["entry"]=="urp-pantyhose"?"Endfield.Diagnostics.Editor.CharacterUrpPantyhoseValidation":(string)job["entry"]=="urp-prefab-boundary"?"Endfield.Diagnostics.Editor.CharacterUrpPrefabBoundaryValidation":((string)job["entry"]=="urp-panty-ingestion"||(string)job["entry"]=="urp-panty-aligned"||(string)job["entry"]=="urp-mpb-timing-a")?"Endfield.Diagnostics.Editor.CharacterUrpPantyIngestionValidation":(string)job["entry"]=="urp-mpb-timing-b"?"Endfield.Diagnostics.Editor.EndfieldMpbOverrideTimingValidation":(string)job["entry"]=="urp-fullchain-aligned"?"Endfield.Diagnostics.Editor.EndfieldFullChainValidation":(string)job["entry"]=="urp-taa-start"?"Endfield.Diagnostics.Editor.EndfieldTaaStartValidation":"Endfield.Diagnostics.Editor.CharacterUrpSceneValidation",false)).First(t=>t!=null);
+                job["cancelRequested"]=true;job["cancelRequestedUtc"]=DateTime.UtcNow.ToString("O");SaveJob();
+                target.GetMethod("Cancel",Type.EmptyTypes).Invoke(null,null);nextPoll=0;PollJob();
+                return new {accepted=true,cancelRequested=true,cancelled=(bool?)job["cancelled"]==true,jobId=(string)job["jobId"],finished=(bool?)job["finished"]==true,passed=false};
+            }
             PollJob();if(job!=null&&(bool?)job["running"]==true)throw new InvalidOperationException("Validation is running; refresh, Play changes and additional validation requests are refused until its finished report");
             PollRefresh();if(refresh!=null&&(bool?)refresh["finished"]!=true)throw new InvalidOperationException("Refresh is still importing/compiling; await its finished state");
             if(pending)throw new InvalidOperationException("An Editor request is pending");
@@ -250,14 +278,14 @@ namespace TA.UnityMcp
             if(route=="/api/editor/play-mode" && !new[]{"enter","exit","pause","resume"}.Contains(action))throw new ArgumentException("Invalid play action");
             if(route=="/api/editor/validation")
             {
-                if(!new[]{"camera","history-clear","preview","preview-restart","diagnostic-preview","dynamic","reference","configure","lifecycle","regression","repair-check","repair-restore"}.Contains(entry))throw new ArgumentException("Unknown validation");
+                if(!new[]{"urp-animation-prepare","urp-animation-run","urp-animation-restore","urp-baseline-hop-return","urp-baseline-hop-check","urp-baseline-hop-exit","urp-taa-start","urp-fullchain-aligned","urp-mpb-timing-a","urp-mpb-timing-b","urp-panty-aligned","urp-panty-ingestion","urp-prefab-boundary","urp-recover-scene","urp-integer-transport","urp-pantyhose","urp-world-shadow","urp-scene-shadow-reload","urp-scene-lifecycle","urp-tone-witness","urp-scene-shadow-import","urp-irradiance-import","urp-shadow-flags","urp-bound-response","urp-cloth-inputs","urp-scene","urp-game","urp-baseline-scene","urp-setup-fault","urp-post-fault","urp-tone","urp-overlay-reload","urp-material-workflow","camera","history-clear","preview","preview-restart","diagnostic-preview","dynamic","reference","configure","lifecycle","regression","repair-check","repair-restore"}.Contains(entry))throw new ArgumentException("Unknown validation");
                 string root=Path.GetFullPath("D:/Endfield/Delivery/evidence/Validation/LobbyAA")+Path.DirectorySeparatorChar;
                 output=Path.GetFullPath(output??"");
                 if(!output.StartsWith(root,StringComparison.OrdinalIgnoreCase)||Directory.Exists(output)||File.Exists(output))throw new ArgumentException("Validation requires a fresh output within LobbyAA evidence");
             }
             if(route=="/api/editor/validation") {
                 string report=entry=="camera"?"camera-report.json":entry=="configure"?"mcp-job.json":"report.json";
-                job=new JObject { ["entry"]=entry,["output"]=output,["reportPath"]=Path.Combine(output,report),["running"]=true,["finished"]=false,["passed"]=false,["startedUtc"]=DateTime.UtcNow.ToString("O") };SaveJob();
+                job=new JObject { ["jobId"]=Guid.NewGuid().ToString("N"),["entry"]=entry,["output"]=output,["reportPath"]=Path.Combine(output,report),["running"]=true,["finished"]=false,["passed"]=false,["startedUtc"]=DateTime.UtcNow.ToString("O") };SaveJob();
             }
             if(route=="/api/editor/refresh") {
                 refresh=new JObject { ["requestId"]=Guid.NewGuid().ToString("N"),["phase"]="queued",["finished"]=false,["passed"]=false,["acceptedUtc"]=DateTime.UtcNow.ToString("O"),["requestedAssemblyId"]=AssemblyId,["requestedWhileFocused"]=UnityEditorInternal.InternalEditorUtility.isApplicationActive };SaveRefresh();
@@ -310,7 +338,7 @@ namespace TA.UnityMcp
                     }
                 } catch(Exception e){lastError=e.ToString();if(route=="/api/editor/validation")FinishJob(false,lastError);if(route=="/api/editor/refresh"){refresh["finished"]=true;refresh["passed"]=false;refresh["error"]=lastError;SaveRefresh();}Debug.LogError(lastError);} finally {pending=false;}
             };
-            return new { accepted=true, request=lastRequest,requestId=route=="/api/editor/refresh"?(string)refresh["requestId"]:null };
+            return new { accepted=true, request=lastRequest,jobId=route=="/api/editor/validation"?(string)job["jobId"]:null,requestId=route=="/api/editor/refresh"?(string)refresh["requestId"]:null };
         }
     }
 }

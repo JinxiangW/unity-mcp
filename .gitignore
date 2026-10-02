@@ -2,3 +2,5 @@ node_modules/
 *.log
 exports/
 .vscode/
+/scripts/BootstrapRefresh.cs
+/scripts/BootstrapRefresh.exe

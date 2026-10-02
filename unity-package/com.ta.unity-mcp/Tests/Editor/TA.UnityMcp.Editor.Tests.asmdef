@@ -1,0 +1,29 @@
+{
+  "name": "TA.UnityMcp.Editor.Tests",
+  "rootNamespace": "TA.UnityMcp.Tests",
+  "references": [
+    "TA.UnityMcp.Editor"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "TA_UNITY_MCP_TEST_FRAMEWORK"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.test-framework",
+      "expression": "1.0.0",
+      "define": "TA_UNITY_MCP_TEST_FRAMEWORK"
+    }
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "noEngineReferences": false
+}

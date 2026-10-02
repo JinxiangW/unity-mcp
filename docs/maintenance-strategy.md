@@ -17,6 +17,7 @@ Any mutation outside explicit material migration artifacts under `Assets/` shoul
 - Query logic belongs in Unity query files
 - Transport/routing belongs in the Unity server file
 - MCP-only input validation and normalization belongs in `src/index.js`
+- Material export target differences belong in `MaterialExportProfiles` / `MaterialExportProfile`, not inline query code
 
 ### 4. Prefer best-effort, explicit behavior
 

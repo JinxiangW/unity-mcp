@@ -49,7 +49,7 @@ namespace TA.UnityMcp
                 ThrowMcp("CONFLICT", $"Transfer package already exists at '{targetFolder}'. Set overwrite=true to update it.");
             }
 
-            var exportProfile = ReadString(request, "exportProfile", "ue-pbr");
+            var exportProfile = ReadString(request, "exportProfile", MaterialExportProfiles.DefaultName);
             var includeShaderGraph = ReadBool(request, "includeShaderGraph", true);
             var recursiveShaderGraphs = ReadBool(request, "recursiveShaderGraphs", true);
             var includeRawProperties = ReadBool(request, "includeRawProperties", true);

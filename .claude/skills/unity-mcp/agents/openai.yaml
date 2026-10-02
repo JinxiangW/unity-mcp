@@ -1,0 +1,7 @@
+# Codex Agent Skills metadata — see https://developers.openai.com/codex/skills/
+interface:
+  display_name: Unity MCP
+  short_description: Unity Editor data access and TA workflows — material export, Shader Graph analysis
+
+policy:
+  allow_implicit_invocation: true
